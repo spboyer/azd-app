@@ -13,7 +13,7 @@ jobs:
   announce:
     name: Post-Release Tasks
     runs-on: ubuntu-latest
-    if: startsWith(github.event.release.tag_name, 'cli-v')
+    if: startsWith(github.event.release.tag_name, 'azd-app-cli-v')
     
     steps:
     - name: Summary

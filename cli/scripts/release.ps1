@@ -42,9 +42,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Get script directory and repo root
+# Get script directory and cli root (parent of scripts directory)
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Split-Path -Parent $scriptDir
+$cliRoot = Split-Path -Parent $scriptDir
 
 # Function to update changelog with new version
 function Update-Changelog {
@@ -53,9 +53,9 @@ function Update-Changelog {
         [string]$Date
     )
     
-    $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+    $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
     if (-not (Test-Path $changelogPath)) {
-        Write-Warning "CHANGELOG.md not found, skipping changelog update"
+        Write-Warning "CHANGELOG.md not found at $changelogPath, skipping changelog update"
         return
     }
     
@@ -78,10 +78,10 @@ function Update-Changelog {
         $lastTag = $Matches[3]
         
         # Update Unreleased link to compare from new version
-        $newContent = $newContent -replace '\[Unreleased\]:\s*https://[^\n]+', "[Unreleased]: https://github.com/$owner/$repo/compare/v$Version...HEAD"
+        $newContent = $newContent -replace '\[Unreleased\]:\s*https://[^\n]+', "[Unreleased]: https://github.com/$owner/$repo/compare/azd-app-cli-v$Version...HEAD"
         
         # Add new version comparison link (insert before existing version links)
-        $versionLink = "[$Version]: https://github.com/$owner/$repo/releases/tag/v$Version"
+        $versionLink = "[$Version]: https://github.com/$owner/$repo/releases/tag/azd-app-cli-v$Version"
         $newContent = $newContent -replace '(\[Unreleased\]:[^\n]+\n)', "`$1$versionLink`n"
     }
     
@@ -93,7 +93,7 @@ function Update-Changelog {
 function Get-ChangelogNotes {
     param([string]$Version)
     
-    $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+    $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
     if (-not (Test-Path $changelogPath)) {
         return "No changelog found."
     }
@@ -112,13 +112,13 @@ function Get-ChangelogNotes {
 # Function to get the last released version from git tags
 function Get-CurrentVersion {
     # Use latest git tag as the source of truth for releases
-    $latestTag = git tag --list "cli-v*" --sort=-version:refname | Select-Object -First 1
-    if ($latestTag -and $latestTag -match '^cli-v(\d+\.\d+\.\d+)$') {
+    $latestTag = git tag --list "azd-app-cli-v*" --sort=-version:refname | Select-Object -First 1
+    if ($latestTag -and $latestTag -match '^azd-app-cli-v(\d+\.\d+\.\d+)$') {
         return $Matches[1]
     }
     
     # If no tags exist, check version.txt as fallback
-    $versionFile = Join-Path $repoRoot "version.txt"
+    $versionFile = Join-Path $cliRoot "version.txt"
     if (Test-Path $versionFile) {
         $versionContent = (Get-Content $versionFile -Raw).Trim()
         if ($versionContent -match '^\d+\.\d+\.\d+$') {
@@ -236,16 +236,16 @@ if ($gitStatus) {
 }
 
 # Check if tag already exists
-$tagExists = git tag -l "cli-v$Version"
+$tagExists = git tag -l "azd-app-cli-v$Version"
 if ($tagExists) {
-    Write-Error "❌ Tag cli-v$Version already exists. Choose a different version or delete the tag first."
+    Write-Error "❌ Tag azd-app-cli-v$Version already exists. Choose a different version or delete the tag first."
     exit 1
 }
 
 # Check if release already exists on GitHub
-gh release view "cli-v$Version" 2>$null | Out-Null
+gh release view "azd-app-cli-v$Version" 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
-    Write-Error "❌ Release cli-v$Version already exists on GitHub."
+    Write-Error "❌ Release azd-app-cli-v$Version already exists on GitHub."
     exit 1
 }
 
@@ -253,7 +253,7 @@ Write-Host ""
 Write-Host "🚀 Release Plan" -ForegroundColor Cyan
 Write-Host "═══════════════" -ForegroundColor Cyan
 Write-Host "Version:        $Version" -ForegroundColor White
-Write-Host "Tag:            cli-v$Version" -ForegroundColor White
+Write-Host "Tag:            azd-app-cli-v$Version" -ForegroundColor White
 Write-Host "Branch:         $currentBranch" -ForegroundColor White
 Write-Host "Repository:     $(gh repo view --json nameWithOwner -q .nameWithOwner)" -ForegroundColor White
 Write-Host ""
@@ -264,7 +264,7 @@ Write-Host "  3. Commit and push the changelog and version changes" -ForegroundC
 Write-Host "  4. Trigger GitHub Actions workflow to:" -ForegroundColor Gray
 Write-Host "     • Build binaries for all platforms" -ForegroundColor DarkGray
 Write-Host "     • Update registry.json with checksums and URLs" -ForegroundColor DarkGray
-Write-Host "     • Create tag cli-v$Version" -ForegroundColor DarkGray
+Write-Host "     • Create tag azd-app-cli-v$Version" -ForegroundColor DarkGray
 Write-Host "     • Create a DRAFT release on GitHub" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "After completion, you can:" -ForegroundColor Green
@@ -293,7 +293,7 @@ Write-Host ""
 Write-Host "📝 Committing changelog and version updates..." -ForegroundColor Yellow
 try {
     # Stage the changelog if it was updated
-    $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+    $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
     if (Test-Path $changelogPath) {
         git add $changelogPath
     }

@@ -35,8 +35,8 @@ jobs:
 
     - name: Check if tag exists
       run: |
-        if git rev-parse "cli-v${{ inputs.version }}" >/dev/null 2>&1; then
-          echo "Error: Tag cli-v${{ inputs.version }} already exists"
+        if git rev-parse "azd-app-cli-v${{ inputs.version }}" >/dev/null 2>&1; then
+          echo "Error: Tag azd-app-cli-v${{ inputs.version }} already exists"
           exit 1
         fi
 
@@ -149,13 +149,13 @@ jobs:
            --arg darwin_amd64 "${{ steps.checksums.outputs.DARWIN_AMD64_SHA }}" \
            --arg darwin_arm64 "${{ steps.checksums.outputs.DARWIN_ARM64_SHA }}" \
            '.extensions[0].versions[0].version = $version |
-            .extensions[0].versions[0].artifacts["windows/amd64"].url = "https://github.com/jongio/azd-app/releases/download/cli-v\($version)/app-windows-amd64.zip" |
+            .extensions[0].versions[0].artifacts["windows/amd64"].url = "https://github.com/jongio/azd-app/releases/download/azd-app-cli-v\($version)/app-windows-amd64.zip" |
             .extensions[0].versions[0].artifacts["windows/amd64"].checksum.value = $win |
-            .extensions[0].versions[0].artifacts["linux/amd64"].url = "https://github.com/jongio/azd-app/releases/download/cli-v\($version)/app-linux-amd64.tar.gz" |
+            .extensions[0].versions[0].artifacts["linux/amd64"].url = "https://github.com/jongio/azd-app/releases/download/azd-app-cli-v\($version)/app-linux-amd64.tar.gz" |
             .extensions[0].versions[0].artifacts["linux/amd64"].checksum.value = $linux |
-            .extensions[0].versions[0].artifacts["darwin/amd64"].url = "https://github.com/jongio/azd-app/releases/download/cli-v\($version)/app-darwin-amd64.tar.gz" |
+            .extensions[0].versions[0].artifacts["darwin/amd64"].url = "https://github.com/jongio/azd-app/releases/download/azd-app-cli-v\($version)/app-darwin-amd64.tar.gz" |
             .extensions[0].versions[0].artifacts["darwin/amd64"].checksum.value = $darwin_amd64 |
-            .extensions[0].versions[0].artifacts["darwin/arm64"].url = "https://github.com/jongio/azd-app/releases/download/cli-v\($version)/app-darwin-arm64.tar.gz" |
+            .extensions[0].versions[0].artifacts["darwin/arm64"].url = "https://github.com/jongio/azd-app/releases/download/azd-app-cli-v\($version)/app-darwin-arm64.tar.gz" |
             .extensions[0].versions[0].artifacts["darwin/arm64"].checksum.value = $darwin_arm64' \
            registry.json > registry.tmp.json && mv registry.tmp.json registry.json
         
@@ -191,13 +191,13 @@ jobs:
 
     - name: Create Git tag
       run: |
-        git tag "cli-v${{ inputs.version }}" -m "Release version ${{ inputs.version }}"
-        git push origin "cli-v${{ inputs.version }}"
+        git tag "azd-app-cli-v${{ inputs.version }}" -m "Release version ${{ inputs.version }}"
+        git push origin "azd-app-cli-v${{ inputs.version }}"
 
     - name: Create Draft GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: cli-v${{ inputs.version }}
+        tag_name: azd-app-cli-v${{ inputs.version }}
         name: CLI v${{ inputs.version }}
         body_path: release-assets/release-notes.md
         files: |
@@ -221,4 +221,4 @@ jobs:
         echo "2. Review the draft release"
         echo "3. Click 'Publish release' when ready"
         echo ""
-        echo "Tag created: cli-v${{ inputs.version }}"
+        echo "Tag created: azd-app-cli-v${{ inputs.version }}"
