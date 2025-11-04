@@ -152,7 +152,6 @@ func findLastArrayLine(lines []string, section *sectionInfo) (int, string) {
 
 		// Check if this is an array item
 		if isArrayItem(trimmed) {
-			lastLineIdx = i
 			if arrayIndent == "" {
 				arrayIndent = getIndentation(line)
 			}
