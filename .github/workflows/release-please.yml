@@ -21,14 +21,9 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          release-type: simple
-          package-name: azd-app-cli
-          path: cli
-          changelog-path: CHANGELOG.md
-          tag-name: azd-app-cli-v${{ steps.release.outputs.version }}
-          include-component-in-tag: false
-          bump-minor-pre-major: true
-          bump-patch-for-minor-pre-major: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   # Build and release when Release-Please creates a release
   build-and-release:
