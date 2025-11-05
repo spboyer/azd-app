@@ -48,7 +48,12 @@ func NewServiceLogger(verbose bool) *ServiceLogger {
 func (l *ServiceLogger) getServiceColor(serviceName string) string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.getServiceColorUnsafe(serviceName)
+}
 
+// getServiceColorUnsafe returns a consistent color for a service without locking.
+// Must be called with mutex already held.
+func (l *ServiceLogger) getServiceColorUnsafe(serviceName string) string {
 	if color, exists := l.colors[serviceName]; exists {
 		return color
 	}
@@ -104,7 +109,7 @@ func (l *ServiceLogger) LogSuccess(serviceName string, message string) {
 	defer l.mu.Unlock()
 
 	timestamp := time.Now().Format("15:04:05")
-	color := l.getServiceColor(serviceName)
+	color := l.getServiceColorUnsafe(serviceName)
 
 	fmt.Printf("%s%s%s %s%-15s%s %s✓%s %s\n",
 		colorGray, timestamp, colorReset,
@@ -119,7 +124,7 @@ func (l *ServiceLogger) LogError(serviceName string, message string) {
 	defer l.mu.Unlock()
 
 	timestamp := time.Now().Format("15:04:05")
-	color := l.getServiceColor(serviceName)
+	color := l.getServiceColorUnsafe(serviceName)
 
 	fmt.Printf("%s%s%s %s%-15s%s %s✗%s %s\n",
 		colorGray, timestamp, colorReset,
@@ -134,7 +139,7 @@ func (l *ServiceLogger) LogWarning(serviceName string, message string) {
 	defer l.mu.Unlock()
 
 	timestamp := time.Now().Format("15:04:05")
-	color := l.getServiceColor(serviceName)
+	color := l.getServiceColorUnsafe(serviceName)
 
 	fmt.Printf("%s%s%s %s%-15s%s %s⚠%s  %s\n",
 		colorGray, timestamp, colorReset,

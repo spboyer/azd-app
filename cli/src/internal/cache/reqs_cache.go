@@ -61,8 +61,11 @@ func NewCacheManager() (*CacheManager, error) {
 }
 
 // findAzureDir searches for .azure directory in current and parent directories.
+// It stops at filesystem boundaries and does not search in user home directory.
 func findAzureDir(startDir string) string {
 	dir := startDir
+	homeDir, _ := os.UserHomeDir()
+
 	for {
 		azureDir := filepath.Join(dir, ".azure")
 		if info, err := os.Stat(azureDir); err == nil && info.IsDir() {
@@ -74,6 +77,12 @@ func findAzureDir(startDir string) string {
 			// Reached root directory
 			break
 		}
+
+		// Stop at home directory to avoid finding user's global .azure
+		if homeDir != "" && parent == homeDir {
+			break
+		}
+
 		dir = parent
 	}
 	return ""

@@ -33,6 +33,9 @@ type PortManager struct {
 		start int
 		end   int
 	}
+	// portChecker is a function that checks if a port is available
+	// This can be overridden in tests to avoid network binding
+	portChecker func(port int) bool
 }
 
 var (
@@ -73,6 +76,9 @@ func GetPortManager(projectDir string) *PortManager {
 	}
 	manager.portRange.start = 3000
 	manager.portRange.end = 65535 // Allow full dynamic port range
+
+	// Set default port checker (can be overridden in tests)
+	manager.portChecker = manager.defaultIsPortAvailable
 
 	// Ensure directory exists
 	if err := os.MkdirAll(portsDir, 0750); err != nil {
@@ -265,6 +271,14 @@ func (pm *PortManager) CleanStalePorts() {
 
 // isPortAvailable checks if a port is available.
 func (pm *PortManager) isPortAvailable(port int) bool {
+	if pm.portChecker != nil {
+		return pm.portChecker(port)
+	}
+	return pm.defaultIsPortAvailable(port)
+}
+
+// defaultIsPortAvailable is the default implementation that actually binds to check port availability.
+func (pm *PortManager) defaultIsPortAvailable(port int) bool {
 	addr := fmt.Sprintf("localhost:%d", port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

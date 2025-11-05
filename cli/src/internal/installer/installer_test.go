@@ -286,3 +286,127 @@ func TestSetupWithPoetry_FallbackToPip(t *testing.T) {
 	// In a real test, we'd mock exec.LookPath to return an error
 	t.Skip("Skipping fallback tests - would require mocking exec.LookPath")
 }
+
+func TestInstallNodeDependencies_InvalidPath(t *testing.T) {
+	project := types.NodeProject{
+		Dir:            "../../../invalid/path",
+		PackageManager: "npm",
+	}
+
+	err := InstallNodeDependencies(project)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestInstallNodeDependencies_InvalidPackageManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	project := types.NodeProject{
+		Dir:            tmpDir,
+		PackageManager: "invalid-pm; rm -rf /",
+	}
+
+	err := InstallNodeDependencies(project)
+	if err == nil {
+		t.Error("expected error for invalid package manager")
+	}
+}
+
+func TestRestoreDotnetProject_InvalidPath(t *testing.T) {
+	project := types.DotnetProject{
+		Path: "../../../invalid/path.csproj",
+	}
+
+	err := RestoreDotnetProject(project)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestSetupPythonVirtualEnv_UnknownPackageManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	project := types.PythonProject{
+		Dir:            tmpDir,
+		PackageManager: "unknown-manager",
+	}
+
+	err := SetupPythonVirtualEnv(project)
+	if err == nil {
+		t.Error("expected error for unknown package manager")
+	}
+
+	if err != nil && err.Error() != "unknown package manager: unknown-manager" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSetupWithPip_ExistingVenv(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .venv directory to simulate existing environment
+	venvDir := filepath.Join(tmpDir, ".venv")
+	if err := os.MkdirAll(venvDir, 0750); err != nil {
+		t.Fatalf("failed to create .venv: %v", err)
+	}
+
+	// Should return nil when venv exists
+	err := setupWithPip(tmpDir)
+	if err != nil {
+		t.Errorf("setupWithPip() with existing venv should not error: %v", err)
+	}
+}
+
+func TestSetupWithPip_NoRequirementsTxt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode - requires python")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Try to create venv without requirements.txt
+	// This will succeed if python is available
+	err := setupWithPip(tmpDir)
+
+	// We don't assert success/failure as it depends on python availability
+	// Just verify it doesn't panic
+	t.Logf("setupWithPip result: %v", err)
+}
+
+func TestSetupWithPoetry_EnvExists(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	// This tests the path where poetry env info succeeds
+	// In practice, this requires poetry to be installed
+	err := setupWithPoetry(tmpDir)
+
+	// We expect this to either succeed or fallback to pip
+	// Just verify it doesn't panic
+	t.Logf("setupWithPoetry result: %v", err)
+}
+
+func TestSetupWithUv_NoUvInstalled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create requirements.txt for fallback
+	requirementsPath := filepath.Join(tmpDir, "requirements.txt")
+	if err := os.WriteFile(requirementsPath, []byte("# empty\n"), 0600); err != nil {
+		t.Fatalf("failed to create requirements.txt: %v", err)
+	}
+
+	// This will fallback to pip if uv is not installed
+	err := setupWithUv(tmpDir)
+
+	// We don't assert success/failure as it depends on tool availability
+	// Just verify it doesn't panic
+	t.Logf("setupWithUv result: %v", err)
+}

@@ -10,15 +10,15 @@ See [azd-context.md](azd-context.md) for details on accessing azd environment va
 
 ## Commands Overview
 
-| Command | Description |
-|---------|-------------|
-| `reqs` | Check and verify required tools and optionally auto-generate requirements |
-| `deps` | Install dependencies for detected projects |
-| `run` | Run the development environment with service orchestration |
-| `logs` | View logs from running services |
-| `info` | Show information about running services |
-| `version` | Show version information |
-| `listen` | Extension framework integration (hidden, used by azd internally) |
+| Command | Description | Detailed Spec |
+|---------|-------------|---------------|
+| `reqs` | Check and verify required tools and optionally auto-generate requirements | [→ Full Spec](commands/reqs.md) |
+| `deps` | Install dependencies for detected projects | [→ Full Spec](commands/deps.md) |
+| `run` | Run the development environment with service orchestration | [→ Full Spec](commands/run.md) |
+| `logs` | View logs from running services | [→ Full Spec](commands/logs.md) |
+| `info` | Show information about running services | [→ Full Spec](commands/info.md) |
+| `version` | Show version information | [→ Full Spec](commands/version.md) |
+| `listen` | Extension framework integration (hidden, used by azd internally) | |
 
 ---
 
@@ -95,7 +95,7 @@ reqs:
     minVersion: "3.12.0"
 ```
 
-See [reqs-command.md](dev/reqs-command.md) for detailed documentation.
+**→ [See full reqs command specification](commands/reqs.md)** for flows, diagrams, and detailed documentation.
 
 ---
 
@@ -136,6 +136,8 @@ None. This command automatically detects and installs dependencies.
 ### Dependencies
 
 This command depends on `reqs` and will automatically run prerequisite checks before installing dependencies.
+
+**→ [See full deps command specification](commands/deps.md)** for package manager detection flows and detailed documentation.
 
 ---
 
@@ -226,6 +228,8 @@ services:
 
 This command depends on `deps` and `reqs`, which will automatically run before starting services.
 
+**→ [See full run command specification](commands/run.md)** for orchestration flows, runtime modes, and detailed documentation.
+
 ---
 
 ## `azd app logs`
@@ -309,6 +313,8 @@ Machine-readable JSON format:
 {"timestamp":"2024-01-15T10:30:45Z","service":"web","level":"info","message":"Starting server on port 3000"}
 ```
 
+**→ [See full logs command specification](commands/logs.md)** for log streaming flows, filtering mechanisms, and detailed documentation.
+
 ---
 
 ## `azd app info`
@@ -369,6 +375,8 @@ api
   PID: 12346
 ```
 
+**→ [See full info command specification](commands/info.md)** for service registry details and detailed documentation.
+
 ---
 
 ## `azd app version`
@@ -394,6 +402,8 @@ Displays the current version of the extension:
 ```
 azd app extension version 0.1.0
 ```
+
+**→ [See full version command specification](commands/version.md)** for version format details.
 
 ---
 

@@ -35,6 +35,15 @@ func BuildDependencyGraph(services map[string]Service, resources map[string]Reso
 		graph.Edges[name] = res.Uses
 	}
 
+	// Validate all dependencies exist
+	for name, deps := range graph.Edges {
+		for _, dep := range deps {
+			if _, exists := graph.Nodes[dep]; !exists {
+				return nil, fmt.Errorf("service or resource '%s' depends on '%s' which does not exist", name, dep)
+			}
+		}
+	}
+
 	// Detect cycles
 	if err := DetectCycles(graph); err != nil {
 		return nil, err

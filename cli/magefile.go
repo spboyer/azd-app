@@ -324,10 +324,11 @@ func Preflight() error {
 		fn   func() error
 	}{
 		{"Building and linting dashboard", 1, DashboardBuild},
-		{"Formatting code", 2, Fmt},
-		{"Running linter (golangci-lint with misspell)", 3, Lint},
-		{"Running security scan (gosec)", 4, runGosec},
-		{"Running all tests with coverage", 5, TestCoverage},
+		{"Running dashboard tests", 2, DashboardTest},
+		{"Formatting code", 3, Fmt},
+		{"Running linter (golangci-lint with misspell)", 4, Lint},
+		{"Running security scan (gosec)", 5, runGosec},
+		{"Running all tests with coverage", 6, TestCoverage},
 	}
 
 	for _, check := range checks {
@@ -372,6 +373,21 @@ func DashboardBuild() error {
 	}
 
 	fmt.Println("✅ Dashboard build complete!")
+	return nil
+}
+
+// DashboardTest runs the dashboard tests with vitest.
+func DashboardTest() error {
+	fmt.Println("Running dashboard tests...")
+
+	dashboardDir := "dashboard"
+
+	// Run tests
+	if err := sh.RunV("npm", "test", "--prefix", dashboardDir); err != nil {
+		return fmt.Errorf("dashboard tests failed: %w", err)
+	}
+
+	fmt.Println("✅ Dashboard tests passed!")
 	return nil
 }
 

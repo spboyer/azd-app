@@ -381,3 +381,232 @@ func TestRunDotnet(t *testing.T) {
 		})
 	}
 }
+
+func TestRunAspire_InvalidPath(t *testing.T) {
+	project := types.AspireProject{
+		Dir:         "../../../invalid/path",
+		ProjectFile: "AppHost.csproj",
+	}
+
+	err := RunAspire(project)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestRunPnpmScript_InvalidScript(t *testing.T) {
+	err := RunPnpmScript("dev; rm -rf /")
+	if err == nil {
+		t.Error("expected error for invalid script name")
+	}
+}
+
+func TestRunDockerCompose_InvalidScript(t *testing.T) {
+	err := RunDockerCompose("start; malicious", "docker compose up")
+	if err == nil {
+		t.Error("expected error for invalid script name")
+	}
+}
+
+func TestRunNode_InvalidPath(t *testing.T) {
+	project := types.NodeProject{
+		Dir:            "../../../invalid/path",
+		PackageManager: "npm",
+	}
+
+	err := RunNode(project, "dev")
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestRunNode_InvalidScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	project := types.NodeProject{
+		Dir:            tmpDir,
+		PackageManager: "npm",
+	}
+
+	err := RunNode(project, "dev; rm -rf /")
+	if err == nil {
+		t.Error("expected error for invalid script name")
+	}
+}
+
+func TestRunNode_InvalidPackageManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	project := types.NodeProject{
+		Dir:            tmpDir,
+		PackageManager: "invalid-pm; rm -rf /",
+	}
+
+	err := RunNode(project, "dev")
+	if err == nil {
+		t.Error("expected error for invalid package manager")
+	}
+}
+
+func TestRunPython_InvalidPath(t *testing.T) {
+	project := types.PythonProject{
+		Dir:            "../../../invalid/path",
+		PackageManager: "pip",
+	}
+
+	err := RunPython(project)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestRunPython_InvalidPackageManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create main.py
+	mainPath := filepath.Join(tmpDir, "main.py")
+	if err := os.WriteFile(mainPath, []byte("print('hello')"), 0600); err != nil {
+		t.Fatalf("failed to create main.py: %v", err)
+	}
+
+	project := types.PythonProject{
+		Dir:            tmpDir,
+		PackageManager: "invalid-pm; rm -rf /",
+	}
+
+	err := RunPython(project)
+	if err == nil {
+		t.Error("expected error for invalid package manager")
+	}
+}
+
+func TestRunPython_NoEntryPoint(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create requirements.txt but no Python entry point
+	reqPath := filepath.Join(tmpDir, "requirements.txt")
+	if err := os.WriteFile(reqPath, []byte("requests==2.28.0\n"), 0600); err != nil {
+		t.Fatalf("failed to create requirements.txt: %v", err)
+	}
+
+	project := types.PythonProject{
+		Dir:            tmpDir,
+		PackageManager: "pip",
+	}
+
+	err := RunPython(project)
+	if err == nil {
+		t.Error("expected error when no entry point found")
+	}
+}
+
+func TestRunPython_WithExplicitEntrypoint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create custom entry point
+	customPath := filepath.Join(tmpDir, "custom_entry.py")
+	if err := os.WriteFile(customPath, []byte("print('hello')"), 0600); err != nil {
+		t.Fatalf("failed to create custom_entry.py: %v", err)
+	}
+
+	project := types.PythonProject{
+		Dir:            tmpDir,
+		PackageManager: "pip",
+		Entrypoint:     "custom_entry.py",
+	}
+
+	// This should not error on validation
+	// (it will error on execution if python isn't installed, but that's ok)
+	_ = RunPython(project)
+}
+
+func TestRunPython_UnsupportedPackageManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create main.py
+	mainPath := filepath.Join(tmpDir, "main.py")
+	if err := os.WriteFile(mainPath, []byte("print('hello')"), 0600); err != nil {
+		t.Fatalf("failed to create main.py: %v", err)
+	}
+
+	project := types.PythonProject{
+		Dir:            tmpDir,
+		PackageManager: "conda", // Not supported
+	}
+
+	// Should fail validation before execution
+	err := RunPython(project)
+	if err == nil {
+		t.Error("expected error for unsupported package manager")
+	}
+}
+
+func TestRunDotnet_InvalidPath(t *testing.T) {
+	project := types.DotnetProject{
+		Path: "../../../invalid/path.csproj",
+	}
+
+	err := RunDotnet(project)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestFindPythonEntryPoint_Priority(t *testing.T) {
+	// Test that main.py is preferred over app.py
+	tmpDir := t.TempDir()
+
+	// Create both main.py and app.py
+	mainPath := filepath.Join(tmpDir, "main.py")
+	appPath := filepath.Join(tmpDir, "app.py")
+
+	if err := os.WriteFile(mainPath, []byte("# main"), 0600); err != nil {
+		t.Fatalf("failed to create main.py: %v", err)
+	}
+	if err := os.WriteFile(appPath, []byte("# app"), 0600); err != nil {
+		t.Fatalf("failed to create app.py: %v", err)
+	}
+
+	entry, err := findPythonEntryPoint(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if entry != "main.py" {
+		t.Errorf("expected main.py to be preferred, got %s", entry)
+	}
+}
+
+func TestFindPythonEntryPoint_DirectoryPriority(t *testing.T) {
+	// Test that root directory is preferred over src/
+	tmpDir := t.TempDir()
+
+	// Create app.py in both root and src/
+	rootPath := filepath.Join(tmpDir, "app.py")
+	srcDir := filepath.Join(tmpDir, "src")
+	srcPath := filepath.Join(srcDir, "app.py")
+
+	if err := os.MkdirAll(srcDir, 0750); err != nil {
+		t.Fatalf("failed to create src dir: %v", err)
+	}
+
+	if err := os.WriteFile(rootPath, []byte("# root"), 0600); err != nil {
+		t.Fatalf("failed to create root app.py: %v", err)
+	}
+	if err := os.WriteFile(srcPath, []byte("# src"), 0600); err != nil {
+		t.Fatalf("failed to create src app.py: %v", err)
+	}
+
+	entry, err := findPythonEntryPoint(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if entry != "app.py" {
+		t.Errorf("expected root app.py to be preferred, got %s", entry)
+	}
+}

@@ -381,3 +381,150 @@ func TestHandleFallback(t *testing.T) {
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr))
 }
+
+func TestHandleGetServices_NoAzureYaml(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	req := httptest.NewRequest("GET", "/api/services", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleGetServices(w, req)
+
+	resp := w.Result()
+	// Should return empty array even without azure.yaml
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 even without azure.yaml, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleGetServices_EmptyRegistry(t *testing.T) {
+	tempDir := t.TempDir()
+
+	azureYamlContent := `name: test-project
+services:
+  test-service:
+    language: python
+    project: ./
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "azure.yaml"), []byte(azureYamlContent), 0600); err != nil {
+		t.Fatalf("Failed to create azure.yaml: %v", err)
+	}
+
+	srv := GetServer(tempDir)
+
+	// Don't register any services in registry
+	req := httptest.NewRequest("GET", "/api/services", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleGetServices(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	var services []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&services); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Should have service from azure.yaml but with default status
+	if len(services) != 1 {
+		t.Errorf("Expected 1 service from azure.yaml, got %d", len(services))
+	}
+}
+
+func TestStop_NotStarted(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	// Call Stop without Start (should not panic)
+	srv.Stop()
+
+	// Verify it was removed from map
+	serversMu.Lock()
+	_, key := normalizeProjectPath(tempDir)
+	_, exists := servers[key]
+	serversMu.Unlock()
+
+	if exists {
+		t.Error("Expected server to be removed from map after Stop()")
+	}
+}
+
+func TestNormalizeProjectPath_EmptyPath(t *testing.T) {
+	absPath, key := normalizeProjectPath("")
+
+	if absPath == "" {
+		t.Error("Expected non-empty absolute path for empty input")
+	}
+
+	if key == "" {
+		t.Error("Expected non-empty key for empty input")
+	}
+}
+
+func TestNormalizeProjectPath_Consistency(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Get normalized path twice
+	abs1, key1 := normalizeProjectPath(tempDir)
+	abs2, key2 := normalizeProjectPath(tempDir)
+
+	if abs1 != abs2 {
+		t.Errorf("Expected consistent absolute path: %s != %s", abs1, abs2)
+	}
+
+	if key1 != key2 {
+		t.Errorf("Expected consistent key: %s != %s", key1, key2)
+	}
+}
+
+func TestServer_MultipleStops(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	// Only call Stop once - multiple stops cause panic
+	srv.Stop()
+
+	// Verify removed from map
+	serversMu.Lock()
+	_, key := normalizeProjectPath(tempDir)
+	_, exists := servers[key]
+	serversMu.Unlock()
+
+	if exists {
+		t.Error("Expected server to be removed after Stop()")
+	}
+}
+
+func TestBroadcastUpdate_MultipleServices(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	services := []*registry.ServiceRegistryEntry{
+		{Name: "service1", URL: "http://localhost:3000", Status: "running"},
+		{Name: "service2", URL: "http://localhost:8080", Status: "starting"},
+		{Name: "service3", URL: "http://localhost:9000", Status: "stopped"},
+	}
+
+	// Should not panic with multiple services and no clients
+	srv.BroadcastUpdate(services)
+}
+
+func TestBroadcastUpdate_EmptyServices(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	// Should not panic with empty services
+	srv.BroadcastUpdate([]*registry.ServiceRegistryEntry{})
+}
+
+func TestBroadcastUpdate_NilServices(t *testing.T) {
+	tempDir := t.TempDir()
+	srv := GetServer(tempDir)
+
+	// Should not panic with nil services
+	srv.BroadcastUpdate(nil)
+}

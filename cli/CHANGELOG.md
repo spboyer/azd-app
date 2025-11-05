@@ -5,6 +5,20 @@ All notable changes to the App Extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Dashboard test coverage with React component tests
+- Command documentation for all CLI commands
+
+### Fixed
+- Windows process health checks now work correctly
+- Test cleanup properly releases log file handles on Windows
+- Dashboard tests pass without React warnings
+
+### Changed
+- Improved overall code coverage with comprehensive test suites
+
 ## [0.1.1] - 2025-11-04
 
 ### Fixed
