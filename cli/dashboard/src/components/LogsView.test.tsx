@@ -73,11 +73,12 @@ describe('LogsView', () => {
 
     render(<LogsView />)
 
+    const select = screen.getByRole('combobox')
+    
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'All Services' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'api' })).toBeInTheDocument()
     })
 
-    const select = screen.getByRole('combobox')
     await user.selectOptions(select, 'api')
 
     await waitFor(() => {
