@@ -56,15 +56,21 @@ function Update-Changelog {
     $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
     if (-not (Test-Path $changelogPath)) {
         Write-Warning "CHANGELOG.md not found at $changelogPath, skipping changelog update"
-        return
+        return $false
     }
     
     $content = Get-Content $changelogPath -Raw
     
-    # Check if there's an [Unreleased] section with content
+    # Check if version section already exists
+    if ($content -match "## \[$Version\]") {
+        Write-Host "ℹ️  Version [$Version] already exists in CHANGELOG.md, skipping update" -ForegroundColor Cyan
+        return $false
+    }
+    
+    # Check if there's an [Unreleased] section
     if ($content -notmatch '## \[Unreleased\]') {
-        Write-Warning "No [Unreleased] section found in CHANGELOG.md"
-        return
+        Write-Warning "No [Unreleased] section found in CHANGELOG.md, skipping update"
+        return $false
     }
     
     # Replace [Unreleased] with the version and date (without adding a new Unreleased section)
@@ -87,6 +93,7 @@ function Update-Changelog {
     
     Set-Content -Path $changelogPath -Value $newContent -NoNewline
     Write-Host "✅ Updated CHANGELOG.md" -ForegroundColor Green
+    return $true
 }
 
 # Function to extract changelog notes for a specific version
@@ -109,8 +116,10 @@ function Get-ChangelogNotes {
     return "See CHANGELOG.md for details."
 }
 
-# Function to extract Unreleased changelog content
-function Get-UnreleasedChangelog {
+# Function to extract Unreleased changelog content or version-specific content
+function Get-ChangelogForRelease {
+    param([string]$Version)
+    
     $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
     if (-not (Test-Path $changelogPath)) {
         return $null
@@ -118,12 +127,21 @@ function Get-UnreleasedChangelog {
     
     $content = Get-Content $changelogPath -Raw
     
-    # Match content between [Unreleased] and the next version section
-    $pattern = "## \[Unreleased\][^\n]*\n(.*?)(?=\n## \[|$)"
-    if ($content -match $pattern) {
+    # First, try to match content in [Unreleased] section
+    if ($content -match '(?s)## \[Unreleased\][^\r\n]*[\r\n]+(.*?)(?=[\r\n]+## \[|$)') {
         $unreleasedContent = $Matches[1].Trim()
         if ($unreleasedContent) {
             return $unreleasedContent
+        }
+    }
+    
+    # If no Unreleased section or it's empty, try to find the version section
+    # Escape the dots in version for regex matching
+    $escapedVersion = [regex]::Escape($Version)
+    if ($content -match "(?s)## \[$escapedVersion\][^\r\n]*[\r\n]+(.*?)(?=[\r\n]+## \[|$)") {
+        $versionContent = $Matches[1].Trim()
+        if ($versionContent) {
+            return $versionContent
         }
     }
     
@@ -279,24 +297,49 @@ Write-Host "Branch:         $currentBranch" -ForegroundColor White
 Write-Host "Repository:     $(gh repo view --json nameWithOwner -q .nameWithOwner)" -ForegroundColor White
 Write-Host ""
 
+# Check if changelog already has this version
+$changelogPath = Join-Path $cliRoot "CHANGELOG.md"
+$changelogHasVersion = $false
+$changelogHasUnreleased = $false
+if (Test-Path $changelogPath) {
+    $changelogContent = Get-Content $changelogPath -Raw
+    $changelogHasVersion = $changelogContent -match "## \[$([regex]::Escape($Version))\]"
+    $changelogHasUnreleased = $changelogContent -match "## \[Unreleased\]"
+}
+
 # Show what will be included in the release notes
-$unreleasedNotes = Get-UnreleasedChangelog
-if ($unreleasedNotes) {
+$releaseNotes = Get-ChangelogForRelease -Version $Version
+if ($releaseNotes) {
     Write-Host "📝 Release Notes Preview:" -ForegroundColor Cyan
     Write-Host "─────────────────────────" -ForegroundColor Cyan
-    Write-Host $unreleasedNotes -ForegroundColor Gray
+    Write-Host $releaseNotes -ForegroundColor Gray
     Write-Host "─────────────────────────" -ForegroundColor Cyan
     Write-Host ""
 } else {
-    Write-Warning "⚠️  No content found in [Unreleased] section of CHANGELOG.md"
+    Write-Warning "⚠️  No changelog content found for version $Version"
     Write-Host "   The release will be created with minimal changelog information." -ForegroundColor Yellow
     Write-Host ""
 }
 
 Write-Host "This will:" -ForegroundColor Yellow
-Write-Host "  1. Update CHANGELOG.md [Unreleased] → [$Version] with today's date" -ForegroundColor Gray
+
+# Show appropriate changelog message
+if ($changelogHasVersion) {
+    Write-Host "  1. Use existing CHANGELOG.md [$Version] section for release notes" -ForegroundColor Gray
+} elseif ($changelogHasUnreleased) {
+    Write-Host "  1. Update CHANGELOG.md [Unreleased] → [$Version] with today's date" -ForegroundColor Gray
+} else {
+    Write-Host "  1. CHANGELOG.md has no [Unreleased] or [$Version] section (will use default notes)" -ForegroundColor Gray
+}
+
 Write-Host "  2. Update version.txt to $Version" -ForegroundColor Gray
-Write-Host "  3. Commit and push the changelog and version changes" -ForegroundColor Gray
+if ($changelogHasVersion) {
+    Write-Host "  3. Skip changelog commit (already up to date)" -ForegroundColor Gray
+} elseif ($changelogHasUnreleased) {
+    Write-Host "  3. Commit and push the changelog changes" -ForegroundColor Gray
+} else {
+    Write-Host "  3. No changelog changes to commit" -ForegroundColor Gray
+}
 Write-Host "  4. Trigger GitHub Actions workflow to:" -ForegroundColor Gray
 Write-Host "     • Build binaries for all platforms" -ForegroundColor DarkGray
 Write-Host "     • Update registry.json with checksums and URLs" -ForegroundColor DarkGray
@@ -323,29 +366,33 @@ if ($confirm -ne 'y') {
 Write-Host ""
 Write-Host "📝 Updating CHANGELOG.md..." -ForegroundColor Yellow
 $today = Get-Date -Format "yyyy-MM-dd"
-Update-Changelog -Version $Version -Date $today
+$changelogUpdated = Update-Changelog -Version $Version -Date $today
 
 Write-Host ""
-Write-Host "📝 Committing changelog and version updates..." -ForegroundColor Yellow
-try {
-    # Stage the changelog if it was updated
-    $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
-    if (Test-Path $changelogPath) {
-        git add $changelogPath
+if ($changelogUpdated) {
+    Write-Host "📝 Committing changelog updates..." -ForegroundColor Yellow
+    try {
+        # Stage the changelog if it was updated
+        $changelogPath = Join-Path $cliRoot "CHANGELOG.md"
+        if (Test-Path $changelogPath) {
+            git add $changelogPath
+        }
+        
+        # Commit the changes
+        $hasChanges = git diff --cached --quiet; $LASTEXITCODE -ne 0
+        if ($hasChanges) {
+            git commit -m "chore: prepare release $Version"
+            git push
+            Write-Host "✅ Changes committed and pushed" -ForegroundColor Green
+        } else {
+            Write-Host "ℹ️  No changelog changes to commit" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Warning "Failed to commit changelog: $_"
+        Write-Host "Continuing with release process..." -ForegroundColor Yellow
     }
-    
-    # Commit the changes (both changelog and version.txt will be committed by workflow, but we do it here for local state)
-    $hasChanges = git diff --cached --quiet; $LASTEXITCODE -ne 0
-    if ($hasChanges) {
-        git commit -m "chore: prepare release $Version"
-        git push
-        Write-Host "✅ Changes committed and pushed" -ForegroundColor Green
-    } else {
-        Write-Host "ℹ️  No changelog changes to commit" -ForegroundColor Gray
-    }
-} catch {
-    Write-Warning "Failed to commit changelog: $_"
-    Write-Host "Continuing with release process..." -ForegroundColor Yellow
+} else {
+    Write-Host "ℹ️  Changelog already up to date, skipping commit" -ForegroundColor Cyan
 }
 
 Write-Host ""
