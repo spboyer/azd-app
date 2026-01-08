@@ -53,6 +53,10 @@ export type { ThemeToggleProps } from './ThemeToggle'
 export { SettingsDialog } from './SettingsDialog'
 export type { SettingsDialogProps } from './SettingsDialog'
 
+// Diagnostics Modal
+export { DiagnosticsModal } from './DiagnosticsModal'
+export type { DiagnosticsModalProps } from './DiagnosticsModal'
+
 // Environment Panel
 export { EnvironmentPanel } from './EnvironmentPanel'
 export type { EnvironmentPanelProps } from './EnvironmentPanel'
@@ -77,3 +81,17 @@ export type { NotificationHistoryItem } from './NotificationCenter'
 export { NotificationStack } from './NotificationStack'
 export type { Notification } from './NotificationStack'
 export { NotificationToast } from './NotificationToast'
+
+// Mode & Azure Status
+export { ModeToggle } from './ModeToggle'
+export type { ModeToggleProps, LogMode } from './ModeToggle'
+export { AzureConnectionStatus, AzureStatusBadge } from './AzureConnectionStatus'
+export type { AzureConnectionStatusProps, AzureConnectionState, AzureStatusBadgeProps } from './AzureConnectionStatus'
+export { LogSourceBadge, InlineLogSource } from './LogSourceBadge'
+export type { LogSourceBadgeProps, LogSource, InlineLogSourceProps } from './LogSourceBadge'
+
+// Log Config Panel
+export { LogConfigPanel } from './LogConfigPanel'
+export type { LogConfigPanelProps } from './LogConfigPanel'
+export { TableSelector } from './TableSelector'
+export type { TableSelectorProps } from './TableSelector'

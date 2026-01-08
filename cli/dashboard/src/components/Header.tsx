@@ -4,7 +4,7 @@
  */
 import * as React from 'react'
 import { 
-  Zap, 
+  Rocket, 
   LayoutGrid, 
   Terminal, 
   Settings2,
@@ -196,7 +196,7 @@ export function Header({
         aria-label="Go to Console"
       >
         <div className="w-7 h-7 rounded-lg bg-linear-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shrink-0">
-          <Zap className="w-4 h-4 text-white" />
+          <Rocket className="w-4 h-4 text-white" />
         </div>
         <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate tracking-tight">
           {projectName || 'Dashboard'}
@@ -304,10 +304,8 @@ export function Header({
         {/* Divider */}
         <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
 
-        {/* Theme Toggle - Only shown when ?theme=1 is in URL */}
-        {new URLSearchParams(window.location.search).get('theme') === '1' && (
-          <ThemeToggle />
-        )}
+        {/* Theme Toggle */}
+        <ThemeToggle />
 
         {/* GitHub Link */}
         <a

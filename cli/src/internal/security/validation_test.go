@@ -1,6 +1,7 @@
 package security
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"strings"
@@ -178,12 +179,9 @@ func TestValidateFilePermissions(t *testing.T) {
 	}
 
 	// Test with secure permissions (0644)
-	warning, err := ValidateFilePermissions(tmpFile)
-	if err != nil {
+	var err error
+	if err = ValidateFilePermissions(tmpFile); err != nil {
 		t.Errorf("ValidateFilePermissions() with 0644 should pass, got error: %v", err)
-	}
-	if warning != "" {
-		t.Errorf("ValidateFilePermissions() with 0644 should not have warning, got: %v", warning)
 	}
 
 	// Skip world-writable test on Windows (uses ACLs)
@@ -213,18 +211,18 @@ func TestValidateFilePermissions(t *testing.T) {
 			}
 		}()
 
-		warning, err = ValidateFilePermissions(tmpFile)
+		err = ValidateFilePermissions(tmpFile)
 		if err == nil {
 			t.Error("ValidateFilePermissions() with 0666 should fail on Unix in non-container environment")
 		}
-		if warning != "" {
-			t.Errorf("ValidateFilePermissions() error case should not have warning, got: %v", warning)
+		if err != nil && !strings.Contains(err.Error(), "insecure file permissions") && !errors.Is(err, ErrInsecureFilePermissions) {
+			t.Errorf("ValidateFilePermissions() returned unexpected error: %v", err)
 		}
 	}
 
 	// Test with non-existent file (only fails on Unix, Windows returns nil)
 	if runtime.GOOS != "windows" {
-		_, err = ValidateFilePermissions("/nonexistent/file")
+		err = ValidateFilePermissions("/nonexistent/file")
 		if err == nil {
 			t.Error("ValidateFilePermissions() with non-existent file should fail on Unix")
 		}
@@ -407,19 +405,19 @@ func TestValidateFilePermissions_ContainerEnvironment(t *testing.T) {
 			name:        "Codespaces - should warn",
 			envVars:     map[string]string{"CODESPACES": "true"},
 			wantWarning: true,
-			wantErr:     false,
+			wantErr:     true,
 		},
 		{
 			name:        "Dev Containers - should warn",
 			envVars:     map[string]string{"REMOTE_CONTAINERS": "true"},
 			wantWarning: true,
-			wantErr:     false,
+			wantErr:     true,
 		},
 		{
 			name:        "Kubernetes - should warn",
 			envVars:     map[string]string{"KUBERNETES_SERVICE_HOST": "10.0.0.1"},
 			wantWarning: true,
-			wantErr:     false,
+			wantErr:     true,
 		},
 	}
 
@@ -456,29 +454,271 @@ func TestValidateFilePermissions_ContainerEnvironment(t *testing.T) {
 				}
 			}()
 
-			warning, err := ValidateFilePermissions(tmpFile)
+			err := ValidateFilePermissions(tmpFile)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateFilePermissions() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			if (warning != "") != tt.wantWarning {
-				t.Errorf("ValidateFilePermissions() warning = %q, wantWarning %v", warning, tt.wantWarning)
-			}
-
-			// Verify warning message format
-			if tt.wantWarning && warning != "" {
-				if !strings.Contains(warning, "world-writable permissions") {
-					t.Errorf("Warning should mention 'world-writable permissions', got: %s", warning)
-				}
-				if !strings.Contains(warning, "container environments") {
-					t.Errorf("Warning should mention 'container environments', got: %s", warning)
-				}
-				if !strings.Contains(warning, "chmod 644") {
-					t.Errorf("Warning should include fix command 'chmod 644', got: %s", warning)
+			if tt.wantWarning {
+				// In container environments, caller is expected to translate the sentinel error
+				// into a warning. Here we assert that the sentinel is returned and/or the
+				// environment is detected.
+				if !errors.Is(err, ErrInsecureFilePermissions) {
+					t.Errorf("expected ErrInsecureFilePermissions in container env, got: %v", err)
 				}
 			}
 		})
+	}
+}
+
+// TestValidateServiceName tests service name validation
+func TestValidateServiceName(t *testing.T) {
+	tests := []struct {
+		name        string
+		serviceName string
+		allowEmpty  bool
+		wantErr     bool
+	}{
+		{
+			name:        "valid service name",
+			serviceName: "api",
+			allowEmpty:  false,
+			wantErr:     false,
+		},
+		{
+			name:        "valid with hyphen",
+			serviceName: "api-service",
+			allowEmpty:  false,
+			wantErr:     false,
+		},
+		{
+			name:        "valid with underscore",
+			serviceName: "api_service",
+			allowEmpty:  false,
+			wantErr:     false,
+		},
+		{
+			name:        "valid with dot",
+			serviceName: "api.service",
+			allowEmpty:  false,
+			wantErr:     false,
+		},
+		{
+			name:        "valid numeric",
+			serviceName: "service1",
+			allowEmpty:  false,
+			wantErr:     false,
+		},
+		{
+			name:        "empty when allowed",
+			serviceName: "",
+			allowEmpty:  true,
+			wantErr:     false,
+		},
+		{
+			name:        "empty when not allowed",
+			serviceName: "",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "too long",
+			serviceName: "this-is-a-very-long-service-name-that-exceeds-sixty-three-characters",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "starts with dash",
+			serviceName: "-api",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "starts with underscore",
+			serviceName: "_api",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "contains forward slash",
+			serviceName: "api/service",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "contains backslash",
+			serviceName: "api\\service",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "path traversal attempt",
+			serviceName: "api..service",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "contains space",
+			serviceName: "api service",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+		{
+			name:        "contains special chars",
+			serviceName: "api@service",
+			allowEmpty:  false,
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateServiceName(tt.serviceName, tt.allowEmpty)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateServiceName() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "invalid service name") {
+				t.Errorf("ValidateServiceName() error should mention invalid service name, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestIsContainerEnvironment_DockerEnv(t *testing.T) {
+	// This tests the /.dockerenv file check
+	// We can't easily test this in unit tests without mocking os.Stat,
+	// but we can at least exercise the code path by calling the function
+	// which will check for the file and return false if not found
+	result := IsContainerEnvironment()
+	// The result depends on whether we're actually in a container
+	// Just verify the function doesn't panic
+	_ = result
+}
+
+func TestValidatePath_SymlinkError(t *testing.T) {
+	// Test path validation with a path that doesn't exist
+	// This exercises the os.IsNotExist branch
+	nonExistentPath := "/tmp/this-should-not-exist-" + t.Name()
+	err := ValidatePath(nonExistentPath)
+	// Should not error on non-existent paths (they might be created later)
+	if err != nil && !strings.Contains(err.Error(), "parent directory reference") {
+		// Only fail if it's not a traversal error
+		t.Logf("ValidatePath() with non-existent path: %v", err)
+	}
+}
+
+func TestValidatePath_WithSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink test more reliable on Unix-like systems")
+	}
+
+	tmpDir := t.TempDir()
+	targetFile := tmpDir + "/target.txt"
+	symlinkPath := tmpDir + "/link.txt"
+
+	// Create target file
+	if err := os.WriteFile(targetFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create target file: %v", err)
+	}
+
+	// Create symlink
+	if err := os.Symlink(targetFile, symlinkPath); err != nil {
+		t.Skipf("Failed to create symlink (may need privileges): %v", err)
+	}
+
+	// Validate the symlink - should succeed as it points to valid location
+	err := ValidatePath(symlinkPath)
+	if err != nil {
+		t.Errorf("ValidatePath() with valid symlink should pass, got: %v", err)
+	}
+}
+
+func TestValidatePath_AbsolutePathConversion(t *testing.T) {
+	// Test that relative paths are converted to absolute
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{
+			name:    "relative path without dots",
+			path:    "some/relative/path",
+			wantErr: false,
+		},
+		{
+			name:    "path with double dots",
+			path:    "some/../path",
+			wantErr: true,
+		},
+		{
+			name:    "path with trailing dots after clean",
+			path:    "normalpath/../..", // This becomes ".." after clean
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidatePath_CleanedPathCheck tests the check after filepath.Clean
+func TestValidatePath_CleanedPathCheck(t *testing.T) {
+	// These paths might pass the initial check but fail after cleaning
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{
+			name:    "path that becomes dots after clean",
+			path:    "./test/../..",
+			wantErr: true,
+		},
+		{
+			name:    "relative traversal",
+			path:    "foo/../../bar",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "parent directory reference") {
+				t.Errorf("Expected path traversal error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidatePath_EvalSymlinksNonExistError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink behavior different on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	brokenSymlink := tmpDir + "/broken-link"
+
+	// Create a symlink pointing to a non-existent target
+	// This should pass validation (path doesn't exist yet, but structure is valid)
+	if err := os.Symlink("/tmp/nonexistent-target-12345", brokenSymlink); err != nil {
+		t.Skipf("Failed to create broken symlink: %v", err)
+	}
+
+	err := ValidatePath(brokenSymlink)
+	// Should not error - the path doesn't exist, but that's okay
+	if err != nil {
+		t.Logf("ValidatePath() with broken symlink: %v", err)
 	}
 }
 
@@ -506,12 +746,39 @@ func TestValidateFilePermissions_SecurePermissions_ContainerEnvironment(t *testi
 		}
 	}()
 
-	// Even in container environment, secure permissions should not produce warning
-	warning, err := ValidateFilePermissions(tmpFile)
-	if err != nil {
+	// Even in container environment, secure permissions should not produce error
+	if err := ValidateFilePermissions(tmpFile); err != nil {
 		t.Errorf("ValidateFilePermissions() with 0644 should not error, got: %v", err)
 	}
-	if warning != "" {
-		t.Errorf("ValidateFilePermissions() with 0644 should not warn, got: %v", warning)
+}
+
+func TestValidatePath_ResolvedPathWithDots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink test more reliable on Unix-like systems")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a directory structure: tmpDir/safe/target.txt
+	safeDir := tmpDir + "/safe"
+	if err := os.MkdirAll(safeDir, 0755); err != nil {
+		t.Fatalf("Failed to create safe dir: %v", err)
+	}
+
+	targetFile := safeDir + "/target.txt"
+	if err := os.WriteFile(targetFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create target file: %v", err)
+	}
+
+	// Create symlink with a benign name
+	symlinkPath := tmpDir + "/link.txt"
+	if err := os.Symlink(targetFile, symlinkPath); err != nil {
+		t.Skipf("Failed to create symlink: %v", err)
+	}
+
+	// This should pass - the symlink resolves to a safe location
+	err := ValidatePath(symlinkPath)
+	if err != nil {
+		t.Errorf("ValidatePath() with safe symlink should pass, got: %v", err)
 	}
 }

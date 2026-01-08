@@ -38,6 +38,7 @@ var (
 	runRuntime           string
 	runWeb               bool
 	runRestartContainers bool
+	runForce             bool
 )
 
 // NewRunCommand creates the run command.
@@ -60,6 +61,7 @@ func NewRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&runRuntime, "runtime", runtimeModeAzd, "Runtime mode: 'azd' (azd dashboard) or 'aspire' (native Aspire with dotnet run)")
 	cmd.Flags().BoolVarP(&runWeb, "web", "w", false, "Open dashboard in browser")
 	cmd.Flags().BoolVar(&runRestartContainers, "restart-containers", false, "Restart containers even if they are already running")
+	cmd.Flags().BoolVar(&runForce, "force", false, "Force clean dependency reinstall (passes --force to deps)")
 
 	return cmd
 }
@@ -69,6 +71,13 @@ func runWithServices(ctx context.Context, _ *cobra.Command, _ []string) error {
 	output.CommandHeader("run", "Run the development environment")
 	if err := validateRuntimeMode(runRuntime); err != nil {
 		return err
+	}
+
+	// Set deps options if --force specified
+	if runForce {
+		opts := GetDepsOptions()
+		opts.Force = true
+		setDepsOptions(opts)
 	}
 
 	// Execute dependencies first (reqs -> deps -> run)
@@ -137,6 +146,9 @@ func runAzdMode(ctx context.Context, azureYamlPath, azureYamlDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse azure.yaml: %w", err)
 	}
+
+	// REMOVED: initializeAzureLogBuffer call - deprecated v1
+	// Azure logs are now fetched on-demand via /api/azure/logs endpoint
 
 	// Execute prerun hook before starting services
 	if err = executePrerunHook(azureYaml, azureYamlDir); err != nil {
@@ -751,3 +763,6 @@ func launchDashboardBrowser(dashboardURL string) bool {
 	}
 	return true
 }
+
+// REMOVED: initializeAzureLogBuffer - deprecated v1 polling/WebSocket implementation
+// Azure logs are now fetched on-demand via /api/azure/logs endpoint (v2 request/response model)

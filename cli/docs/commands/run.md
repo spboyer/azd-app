@@ -30,6 +30,8 @@ azd app run [flags]
 | `--env-file` | | string | | Load environment variables from .env file |
 | `--verbose` | `-v` | bool | `false` | Enable verbose logging |
 | `--dry-run` | | bool | `false` | Show execution plan without starting services |
+| `--restart-containers` | | bool | `false` | Restart containers even if they are already running |
+| `--force` | | bool | `false` | Force clean dependency reinstall (passes --force to deps) |
 | `--web` | `-w` | bool | `false` | Open dashboard in browser |
 
 ## Dashboard Browser Launch
@@ -859,19 +861,19 @@ services:
   # Frontend service
   web:
     language: js
-    host: containerapp
+    host: local
     project: ./src/web
   
   # Backend API
   api:
     language: python
-    host: containerapp
+    host: local
     project: ./src/api
   
   # .NET Aspire AppHost
   apphost:
     language: csharp
-    host: containerapp
+    host: local
     project: ./src/apphost
 
 # Resources (databases, caches, etc.)
@@ -915,6 +917,7 @@ services:
   
   # Container service
   azurite:
+    host: local
     image: mcr.microsoft.com/azure-storage/azurite:latest
     ports:
       - "10000:10000"
@@ -1071,6 +1074,16 @@ azd app run --env-file .env.local
 azd app run --runtime aspire
 
 # Get Aspire dashboard, tracing, metrics
+```
+
+### 6. Force Clean Dependency Reinstall
+
+```bash
+# Force clean dependency reinstall before running
+azd app run --force
+
+# Combine with other flags
+azd app run --force --web
 ```
 
 ## Troubleshooting

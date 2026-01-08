@@ -1,9 +1,7 @@
 package serviceinfo
 
 import (
-	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -64,6 +62,7 @@ type ServiceInfo struct {
 	Name string `json:"name"`
 
 	// Azure.yaml definition info
+	Host      string `json:"host,omitempty"` // Host type from azure.yaml: "local", "containerapp", "appservice", "function", etc.
 	Language  string `json:"language,omitempty"`
 	Framework string `json:"framework,omitempty"`
 	Project   string `json:"project,omitempty"`
@@ -138,25 +137,23 @@ func parseAzureYaml(projectDir string) (*service.AzureYaml, error) {
 	return azureYaml, nil
 }
 
-// getAzureEnvironmentValues reads Azure environment variables from azd env get-values.
-// This returns all environment variables defined in the azd environment, not system variables.
+// getAzureEnvironmentValues reads Azure environment variables from the process environment.
+// When running as an azd extension, all Azure environment variables are already available
+// via os.Environ() - no need to shell out to 'azd env get-values'.
 // Additionally, it merges in values from the event-driven environment cache which is updated
 // when azd provision completes.
 func getAzureEnvironmentValues(projectDir string) map[string]string {
 	envVars := make(map[string]string)
 
-	// Get environment variables from azd env get-values
-	cmd := exec.Command("azd", "env", "get-values", "--output", "json")
-	if projectDir != "" {
-		cmd.Dir = projectDir
-	}
-	output, err := cmd.Output()
-	if err == nil {
-		var azdEnvVars map[string]string
-		if err := json.Unmarshal(output, &azdEnvVars); err == nil {
-			// Add all environment variables from azd
-			for key, value := range azdEnvVars {
-				envVars[key] = value
+	// Get Azure environment variables from the process environment
+	// The azd extension framework provides these automatically: AZURE_*, SERVICE_*
+	for _, line := range os.Environ() {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := parts[0]
+			// Only collect Azure and Service environment variables
+			if strings.HasPrefix(key, "AZURE_") || strings.HasPrefix(key, "SERVICE_") {
+				envVars[key] = parts[1]
 			}
 		}
 	}
@@ -170,6 +167,13 @@ func getAzureEnvironmentValues(projectDir string) map[string]string {
 	environmentCacheMu.RUnlock()
 
 	return envVars
+}
+
+// normalizeServiceName converts a service name from environment variable format to azure.yaml format.
+// Environment variables use underscores (SERVICE_CONTAINERAPP_API_NAME) while azure.yaml uses hyphens (containerapp-api).
+func normalizeServiceName(name string) string {
+	// Convert to lowercase and replace underscores with hyphens
+	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }
 
 // extractAzureServiceInfo extracts Azure service information from environment variables.
@@ -190,7 +194,7 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 			(strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")) {
 			serviceName := strings.TrimPrefix(keyUpper, "SERVICE_")
 			serviceName = strings.TrimSuffix(serviceName, "_URL")
-			serviceName = strings.ToLower(serviceName)
+			serviceName = normalizeServiceName(serviceName)
 
 			if serviceName != "" {
 				info := azureServices[serviceName]
@@ -204,7 +208,7 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 		if strings.HasSuffix(keyUpper, "_URL") &&
 			(strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")) {
 			serviceName := strings.TrimSuffix(keyUpper, "_URL")
-			serviceName = strings.ToLower(serviceName)
+			serviceName = normalizeServiceName(serviceName)
 
 			if serviceName != "" {
 				// Only set if not already set by higher priority pattern
@@ -220,7 +224,7 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 		if strings.HasPrefix(keyUpper, "SERVICE_") && strings.HasSuffix(keyUpper, "_NAME") && !strings.HasSuffix(keyUpper, "_IMAGE_NAME") {
 			serviceName := strings.TrimPrefix(keyUpper, "SERVICE_")
 			serviceName = strings.TrimSuffix(serviceName, "_NAME")
-			serviceName = strings.ToLower(serviceName)
+			serviceName = normalizeServiceName(serviceName)
 
 			if serviceName != "" {
 				info := azureServices[serviceName]
@@ -233,7 +237,7 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 		// Pattern 2: {SERVICE_NAME}_NAME -> Azure resource name (without SERVICE_ prefix)
 		if strings.HasSuffix(keyUpper, "_NAME") && !strings.HasSuffix(keyUpper, "_IMAGE_NAME") {
 			serviceName := strings.TrimSuffix(keyUpper, "_NAME")
-			serviceName = strings.ToLower(serviceName)
+			serviceName = normalizeServiceName(serviceName)
 
 			if serviceName != "" {
 				// Only set if not already set by higher priority pattern
@@ -249,7 +253,7 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 		if strings.HasPrefix(keyUpper, "SERVICE_") && strings.HasSuffix(keyUpper, "_IMAGE_NAME") {
 			serviceName := strings.TrimPrefix(keyUpper, "SERVICE_")
 			serviceName = strings.TrimSuffix(serviceName, "_IMAGE_NAME")
-			serviceName = strings.ToLower(serviceName)
+			serviceName = normalizeServiceName(serviceName)
 
 			if serviceName != "" {
 				info := azureServices[serviceName]
@@ -273,6 +277,7 @@ func mergeServiceInfo(azureYaml *service.AzureYaml, runningServices []*registry.
 			normalizedName := strings.ToLower(name)
 			serviceMap[normalizedName] = &ServiceInfo{
 				Name:            name, // Preserve original casing for display
+				Host:            svc.Host,
 				Language:        svc.Language,
 				Project:         svc.Project,
 				Framework:       detectFramework(svc),

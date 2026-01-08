@@ -14,12 +14,14 @@ const yamlBasic = `services:
     language: node
     
   postgres:
+    host: containerapp
     image: postgres:16
     ports:
       - "5432:5432"`;
 
 const yamlWithEnv = `services:
   postgres:
+    host: containerapp
     image: postgres:16
     ports:
       - "5432:5432"
@@ -30,6 +32,7 @@ const yamlWithEnv = `services:
 
 const yamlWithVolume = `services:
   postgres:
+    host: containerapp
     image: postgres:16
     ports:
       - "5432:5432"
@@ -42,6 +45,7 @@ const yamlWithVolume = `services:
 
 const yamlWithHealth = `services:
   postgres:
+    host: containerapp
     image: postgres:16
     ports:
       - "5432:5432"
@@ -64,6 +68,7 @@ const yamlFullExample = `services:
       AZURE_STORAGE_CONNECTION_STRING: UseDevelopmentStorage=true
     
   postgres:
+    host: containerapp
     image: postgres:16
     ports:
       - "5432:5432"
@@ -80,6 +85,7 @@ const yamlFullExample = `services:
       retries: 5
       
   redis:
+    host: containerapp
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -90,6 +96,7 @@ const yamlFullExample = `services:
       retries: 5
       
   azurite:
+    host: containerapp
     image: mcr.microsoft.com/azure-storage/azurite:latest
     ports:
       - "10000:10000"  # Blob
@@ -420,6 +427,7 @@ azd app run --dry-run`;
     <!-- See Also -->
     <h2 class="text-2xl font-bold mt-12 mb-4">See Also</h2>
     <ul class="list-disc list-inside text-neutral-700 dark:text-neutral-300 space-y-2">
+      <li><a href="/azd-app/reference/azure-yaml/" class="text-blue-600 dark:text-blue-400 hover:underline">azure.yaml Reference</a> - Complete configuration guide including container services</li>
       <li><a href="/azd-app/reference/cli/add/" class="text-blue-600 dark:text-blue-400 hover:underline">azd app add</a> - Add container services to your project</li>
       <li><a href="/azd-app/reference/cli/run/" class="text-blue-600 dark:text-blue-400 hover:underline">azd app run</a> - Start all services including containers</li>
       <li><a href="/azd-app/reference/cli/health/" class="text-blue-600 dark:text-blue-400 hover:underline">azd app health</a> - Monitor container health status</li>

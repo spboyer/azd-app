@@ -1,3 +1,6 @@
+// Package yamlutil provides utilities for manipulating YAML files while preserving
+// formatting, comments, and structure. It uses text-based manipulation to guarantee
+// zero data loss when updating YAML configuration files.
 package yamlutil
 
 import (
@@ -31,8 +34,8 @@ func UpdateServicePort(azureYamlPath, serviceName string, port int) error {
 	var azureYaml struct {
 		Services map[string]any `yaml:"services"`
 	}
-	if err := yaml.Unmarshal(data, &azureYaml); err != nil {
-		return fmt.Errorf("failed to parse azure.yaml: %w", err)
+	if parseErr := yaml.Unmarshal(data, &azureYaml); parseErr != nil {
+		return fmt.Errorf("failed to parse azure.yaml: %w", parseErr)
 	}
 
 	if azureYaml.Services == nil {
@@ -68,7 +71,7 @@ func updateServicePortsInText(content, serviceName string, port int) (string, er
 	}
 
 	// Find the specific service
-	serviceInfo, err := findServiceInSection(lines, servicesInfo, serviceName)
+	serviceInfo, err := FindServiceInSection(lines, servicesInfo, serviceName)
 	if err != nil {
 		return "", err
 	}
@@ -82,10 +85,10 @@ func updateServicePortsInText(content, serviceName string, port int) (string, er
 
 	if portsLineIdx >= 0 {
 		// Check if ports is inline format: ports: ["3000"] or ports: ["3000", "8080"]
-		portsLine := lines[portsLineIdx]
-		if strings.Contains(portsLine, "[") {
+		currentPortsLine := lines[portsLineIdx]
+		if strings.Contains(currentPortsLine, "[") {
 			// Inline array format - replace entire line
-			lineIndent := getIndentation(portsLine)
+			lineIndent := getIndentation(currentPortsLine)
 			lines[portsLineIdx] = fmt.Sprintf("%sports: [\"%d\"]", lineIndent, port)
 			return strings.Join(lines, "\n"), nil
 		}
@@ -141,11 +144,42 @@ type serviceInfo struct {
 	indent  string // Indentation of the service properties
 }
 
-// findServiceInSection finds a specific service within the services section.
-func findServiceInSection(lines []string, servicesInfo *sectionInfo, serviceName string) (*serviceInfo, error) {
+// FindServiceInSection finds a specific service within the services section.
+// Exported for use by other yamlutil functions.
+func FindServiceInSection(lines []string, servicesInfo *sectionInfo, serviceName string) (*serviceInfo, error) {
 	searchKey := serviceName + ":"
-	serviceIndent := servicesInfo.indent + "  "
 
+	// Detect the actual service-level indentation by finding the first service
+	var serviceIndent string
+	for i := servicesInfo.lineIdx + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		lineIndent := getIndentation(line)
+
+		// Check indentation - if less than or equal to services indent, we've left the services section
+		if len(lineIndent) <= len(servicesInfo.indent) {
+			break
+		}
+
+		// First non-empty, non-comment line at greater indentation is a service
+		if len(lineIndent) > len(servicesInfo.indent) {
+			serviceIndent = lineIndent
+			break
+		}
+	}
+
+	// If we couldn't detect service indent, use default
+	if serviceIndent == "" {
+		serviceIndent = servicesInfo.indent + "  "
+	}
+
+	// Now find the specific service
 	for i := servicesInfo.lineIdx + 1; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
@@ -163,8 +197,9 @@ func findServiceInSection(lines []string, servicesInfo *sectionInfo, serviceName
 
 		// Check if this is our service
 		if len(lineIndent) == len(serviceIndent) && (trimmed == searchKey || strings.HasPrefix(trimmed, searchKey+" ")) {
-			// Found the service, now find its property indent
-			propertyIndent := serviceIndent + "  "
+			// Calculate property indent (same delta as service indent from services indent)
+			indentDelta := len(serviceIndent) - len(servicesInfo.indent)
+			propertyIndent := serviceIndent + strings.Repeat(" ", indentDelta)
 			return &serviceInfo{
 				lineIdx: i,
 				indent:  propertyIndent,

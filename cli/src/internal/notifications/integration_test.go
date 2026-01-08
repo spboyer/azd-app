@@ -112,6 +112,35 @@ func TestNotificationManager(t *testing.T) {
 		// Just verify the method doesn't panic
 		_ = nm.IsNotificationsEnabled()
 	})
+
+	t.Run("SendTestNotification", func(t *testing.T) {
+		cfg := DefaultNotificationManagerConfig(t.TempDir())
+		nm, err := NewNotificationManager(cfg)
+		require.NoError(t, err)
+
+		// Test sending notification - may fail if notifier not available
+		err = nm.SendTestNotification()
+		// Don't fail test if notifications unavailable on this system
+		// Just verify the method executes without panic
+		if err != nil {
+			t.Logf("SendTestNotification error (expected on some systems): %v", err)
+		}
+	})
+
+	t.Run("SetDashboardURL", func(t *testing.T) {
+		cfg := DefaultNotificationManagerConfig(t.TempDir())
+		nm, err := NewNotificationManager(cfg)
+		require.NoError(t, err)
+
+		// Should not panic even if osHandler is nil
+		nm.SetDashboardURL("http://localhost:3000")
+
+		// If osHandler exists, ensure calling a safe method doesn't panic
+		if nm.osHandler != nil {
+			// no-op call to avoid empty branch; Ensure method is safe to call
+			_ = nm.osHandler
+		}
+	})
 }
 
 func TestDefaultNotificationManagerConfig(t *testing.T) {

@@ -64,7 +64,7 @@ func StartContainerService(runtime *ServiceRuntime, projectDir string, restartCo
 
 	// Check if Docker is available
 	if !client.IsAvailable() {
-		return nil, fmt.Errorf("Docker is not available - please ensure Docker Desktop or Docker daemon is running")
+		return nil, fmt.Errorf("docker is not available - please ensure Docker Desktop or Docker daemon is running")
 	}
 
 	slog.Debug("starting container service",
@@ -81,27 +81,50 @@ func StartContainerService(runtime *ServiceRuntime, projectDir string, restartCo
 			slog.String("error", err.Error()))
 	}
 
-	// Check if container already exists and is running
+	// Check if container already exists
 	containerName := fmt.Sprintf("azd-%s", runtime.Name)
 	if !restartContainers {
 		if container, err := client.InspectByName(containerName); err == nil && container != nil {
 			// Container exists
+			displayID := container.ID
+			if len(displayID) > containerIDDisplayLength {
+				displayID = displayID[:containerIDDisplayLength]
+			}
+
 			if client.IsRunning(container.ID) {
-				displayID := container.ID
-				if len(displayID) > containerIDDisplayLength {
-					displayID = displayID[:containerIDDisplayLength]
-				}
+				// Already running - reuse it
 				slog.Debug("container already running, reusing existing container",
 					slog.String("service", runtime.Name),
 					slog.String("container_name", containerName),
 					slog.String("container_id", displayID))
 
-				// Return existing container process
 				process := &ServiceProcess{
 					Name:        runtime.Name,
 					Runtime:     *runtime,
 					Port:        runtime.Port,
 					Ready:       true, // Container is already running
+					Env:         runtime.Env,
+					ContainerID: container.ID,
+				}
+				return process, nil
+			}
+
+			// Container exists but is stopped - start it instead of recreating
+			slog.Debug("starting existing stopped container",
+				slog.String("service", runtime.Name),
+				slog.String("container_name", containerName),
+				slog.String("container_id", displayID))
+
+			if err := client.Start(container.ID); err != nil {
+				slog.Warn("failed to start stopped container, will recreate",
+					slog.String("error", err.Error()))
+			} else {
+				// Successfully started existing container
+				process := &ServiceProcess{
+					Name:        runtime.Name,
+					Runtime:     *runtime,
+					Port:        runtime.Port,
+					Ready:       false, // Will be marked ready after health check
 					Env:         runtime.Env,
 					ContainerID: container.ID,
 				}
@@ -175,7 +198,9 @@ func buildContainerPortMappings(runtime *ServiceRuntime) []docker.PortMapping {
 		})
 	}
 
-	// TODO: Parse additional ports from runtime if needed
+	// TODO(#1001): Parse additional ports from runtime if needed
+	// Currently only maps the primary port from runtime.Port. Need to support multiple port mappings
+	// for services that expose additional ports (e.g., debug ports, metrics endpoints).
 
 	return mappings
 }

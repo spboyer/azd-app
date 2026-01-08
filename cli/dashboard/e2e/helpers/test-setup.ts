@@ -18,6 +18,7 @@ export function createServiceFixture(options: {
   serviceType?: 'http' | 'tcp' | 'process'
   serviceMode?: 'watch' | 'build' | 'daemon' | 'task'
   error?: string
+  host?: 'local'
   azure?: { url: string; resourceName: string }
 }): Service {
   const port = options.port ?? 3000 + Math.floor(Math.random() * 5000)
@@ -25,6 +26,7 @@ export function createServiceFixture(options: {
 
   return {
     name: options.name,
+    host: options.host,
     language: options.language ?? 'TypeScript',
     framework: options.framework ?? 'Express',
     project: `./src/${options.name}`,
@@ -184,8 +186,8 @@ export function createHealthCheckFixture(
 // =============================================================================
 
 export interface TestScenario {
-  services: Service[]
-  healthChecks: HealthCheckResult[]
+  services: ReadonlyArray<Service>
+  healthChecks: ReadonlyArray<HealthCheckResult>
   healthSummary: HealthSummary
 }
 
@@ -329,6 +331,100 @@ export const scenarios = {
       },
     }
   },
+
+  /** Unhealthy services scenario */
+  unhealthyServices: (): TestScenario => ({
+    services: [
+      createServiceFixture({
+        name: 'api',
+        status: 'running',
+        health: 'unhealthy',
+        port: 3001,
+        error: 'HTTP 503: Service Unavailable',
+      }),
+    ],
+    healthChecks: [
+      {
+        serviceName: 'api',
+        status: 'unhealthy',
+        checkType: 'http',
+        endpoint: 'http://localhost:3001/health',
+        responseTime: 45_000_000,
+        statusCode: 503,
+        error: 'HTTP 503: Service Unavailable',
+        errorDetails: 'Database connection pool exhausted',
+        consecutiveFailures: 3,
+        timestamp: new Date().toISOString(),
+        port: 3001,
+        pid: 12345,
+        uptime: 947_000_000_000,
+        details: {
+          suggestion: 'Service temporarily unavailable. Check if dependencies are running.',
+        },
+      } as HealthCheckResult,
+    ],
+    healthSummary: {
+      total: 1, healthy: 0, degraded: 0, unhealthy: 1, starting: 0, stopped: 0, unknown: 0, overall: 'unhealthy'
+    },
+  }),
+
+  /** Degraded services scenario */
+  degradedServices: (): TestScenario => ({
+    services: [
+      createServiceFixture({
+        name: 'api',
+        status: 'running',
+        health: 'degraded',
+        port: 3001,
+      }),
+    ],
+    healthChecks: [
+      {
+        serviceName: 'api',
+        status: 'degraded',
+        checkType: 'http',
+        endpoint: 'http://localhost:3001/health',
+        responseTime: 1_234_000_000,
+        statusCode: 200,
+        timestamp: new Date().toISOString(),
+        port: 3001,
+        pid: 12345,
+        uptime: 947_000_000_000,
+        details: {
+          warning: 'Response time exceeds threshold (>1000ms)',
+        },
+      } as HealthCheckResult,
+    ],
+    healthSummary: {
+      total: 1, healthy: 0, degraded: 1, unhealthy: 0, starting: 0, stopped: 0, unknown: 0, overall: 'degraded'
+    },
+  }),
+
+  /** Unknown health services scenario */
+  unknownHealthServices: (): TestScenario => ({
+    services: [
+      createServiceFixture({
+        name: 'api',
+        status: 'running',
+        health: 'unknown',
+        port: 3001,
+      }),
+    ],
+    healthChecks: [
+      {
+        serviceName: 'api',
+        status: 'unknown',
+        checkType: 'http',
+        timestamp: new Date().toISOString(),
+        port: 3001,
+        pid: 12345,
+        uptime: 135_000_000_000,
+      } as HealthCheckResult,
+    ],
+    healthSummary: {
+      total: 1, healthy: 0, degraded: 0, unhealthy: 0, starting: 0, stopped: 0, unknown: 1, overall: 'unknown'
+    },
+  }),
 }
 
 // =============================================================================
@@ -413,9 +509,21 @@ export async function mockApiRoutes(page: Page, options: {
   scenario?: TestScenario
   projectName?: string
   logs?: Array<{ service: string; message: string; level: number; timestamp: string; isStderr: boolean }>
+  azure?: {
+    enabled?: boolean
+    status?: 'connected' | 'disconnected' | 'connecting' | 'disabled'
+    mode?: 'local' | 'azure'
+    connectionMessage?: string
+  }
+  azureLogs?: Array<{ service: string; message: string; level: number; timestamp: string; isStderr: boolean }>
 } = {}) {
   const { projectName = 'test-project', logs = [] } = options
   const scenario = options.scenario ?? scenarios.standard()
+  const azureEnabled = options.azure?.enabled ?? false
+  const azureStatus = options.azure?.status ?? (azureEnabled ? 'connected' : 'disabled')
+  const connectionMessage = options.azure?.connectionMessage
+  let currentMode: 'local' | 'azure' = options.azure?.mode ?? 'local'
+  const azureLogs = options.azureLogs ?? []
 
   // Project info
   await page.route('/api/project', async route => {
@@ -455,23 +563,75 @@ export async function mockApiRoutes(page: Page, options: {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"restarted": 2, "failed": 0}' })
   })
 
+  // Shared preferences state (persisted across page reloads within same test)
+  let currentPreferences = {
+    version: '1.0',
+    theme: 'light' as 'light' | 'dark',
+    ui: { gridColumns: 2, viewMode: 'grid' as 'grid' | 'unified', gridAutoFit: true, selectedServices: [] as string[] },
+    behavior: { autoScroll: true, pauseOnScroll: true, timestampFormat: 'hh:mm:ss.sss' },
+    copy: { defaultFormat: 'plaintext', includeTimestamp: true, includeService: true },
+  }
+
   // Logs preferences (must be before /api/logs*)
   await page.route('/api/logs/preferences*', async route => {
     if (route.request().method() === 'POST') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+      // Save the updated preferences
+      try {
+        const body = route.request().postDataJSON() as Partial<typeof currentPreferences> | null
+        if (body) {
+          currentPreferences = { ...currentPreferences, ...body }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(currentPreferences) })
     } else {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          version: '1.0',
-          theme: 'light',
-          ui: { gridColumns: 2, viewMode: 'grid', gridAutoFit: true, selectedServices: [] },
-          behavior: { autoScroll: true, pauseOnScroll: true, timestampFormat: 'hh:mm:ss.sss' },
-          copy: { defaultFormat: 'plaintext', includeTimestamp: true, includeService: true },
-        }),
+        body: JSON.stringify(currentPreferences),
       })
     }
+  })
+
+  // Mode (local/azure) and Azure availability status
+  await page.route('/api/mode', async route => {
+    const method = route.request().method()
+
+    if (method === 'PUT') {
+      try {
+        const body = route.request().postDataJSON() as { mode?: 'local' | 'azure' }
+        if (body?.mode === 'local' || body?.mode === 'azure') {
+          currentMode = body.mode
+        }
+      } catch {
+        // Ignore invalid JSON
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          mode: currentMode,
+          azureEnabled,
+          azureStatus,
+          connectionMessage,
+        }),
+      })
+      return
+    }
+
+    // GET
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: currentMode,
+        azureEnabled,
+        azureStatus,
+        connectionMessage,
+      }),
+    })
   })
 
   // Logs
@@ -483,19 +643,68 @@ export async function mockApiRoutes(page: Page, options: {
     })
   })
 
-  // Preferences
-  await page.route('/api/preferences*', async route => {
+  // Azure logs endpoints used by the Console/LogsPane and diagnostics
+  await page.route('/api/azure/logs*', async route => {
+    const url = new URL(route.request().url())
+    const service = url.searchParams.get('service')
+    const filtered = service ? azureLogs.filter(l => l.service === service) : azureLogs
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        version: '1.0',
-        theme: 'light',
-        ui: { gridColumns: 2, viewMode: 'grid', gridAutoFit: true, selectedServices: [] },
-        behavior: { autoScroll: true, pauseOnScroll: true, timestampFormat: 'hh:mm:ss.sss' },
-        copy: { defaultFormat: 'plaintext', includeTimestamp: true, includeService: true },
-      }),
+      body: JSON.stringify({ status: 'ok', logs: filtered }),
     })
+  })
+
+  await page.route('/api/azure/logs/health*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'healthy', checks: [] }),
+    })
+  })
+
+  await page.route('/api/azure/tables*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tables: [] }),
+    })
+  })
+
+  await page.route('/api/azure/query*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ query: '// mocked', resourceType: 'mock' }),
+    })
+  })
+
+  // Note: Preferences are now handled by /api/logs/preferences above, not /api/preferences
+  // This route is kept for backward compatibility but delegates to the same storage
+  await page.route('/api/preferences*', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(currentPreferences),
+      })
+    } else if (route.request().method() === 'POST' || route.request().method() === 'PUT') {
+      try {
+        const body = route.request().postDataJSON() as Partial<typeof currentPreferences> | null
+        if (body) {
+          currentPreferences = { ...currentPreferences, ...body }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(currentPreferences),
+      })
+    } else {
+      await route.continue()
+    }
   })
 
   // Classifications
@@ -559,8 +768,14 @@ export async function setupTest(page: Page, options: {
   scenario?: TestScenario
   projectName?: string
   clearStorage?: boolean
+  azure?: {
+    enabled?: boolean
+    status?: 'connected' | 'disconnected' | 'connecting' | 'disabled'
+    mode?: 'local' | 'azure'
+    connectionMessage?: string
+  }
 } = {}) {
-  const { scenario, projectName = 'test-project', clearStorage = true } = options
+  const { scenario, projectName = 'test-project', clearStorage = true, azure } = options
   
   // Clear storage
   if (clearStorage) {
@@ -570,7 +785,7 @@ export async function setupTest(page: Page, options: {
   // Setup mocks
   await mockEventSource(page, scenario)
   await mockWebSocket(page)
-  await mockApiRoutes(page, { scenario, projectName })
+  await mockApiRoutes(page, { scenario, projectName, azure })
 }
 
 // =============================================================================

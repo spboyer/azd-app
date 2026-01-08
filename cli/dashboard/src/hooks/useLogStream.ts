@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { MAX_LOGS_IN_MEMORY } from '@/lib/log-utils'
+import { WEBSOCKET_CONSTANTS } from '@/lib/constants'
 
 export interface LogEntry {
   service: string
@@ -21,9 +22,9 @@ interface UseLogStreamOptions {
 }
 
 // WebSocket reconnection constants
-const WS_INITIAL_RETRY_DELAY_MS = 1000
-const WS_MAX_RETRY_DELAY_MS = 30000
-const WS_MAX_RETRIES = 10
+const WS_INITIAL_RETRY_DELAY_MS = WEBSOCKET_CONSTANTS.WS_INITIAL_RETRY_DELAY_MS
+const WS_MAX_RETRY_DELAY_MS = WEBSOCKET_CONSTANTS.WS_MAX_RETRY_DELAY_MS
+const WS_MAX_RETRIES = WEBSOCKET_CONSTANTS.WS_MAX_RETRIES
 
 /**
  * Shared hook for streaming logs from the backend via WebSocket.
@@ -109,7 +110,13 @@ export function useLogStream({
   const setupWebSocket = useCallback(() => {
     // Close existing connection
     if (wsRef.current) {
-      wsRef.current.close()
+      const currentWs = wsRef.current
+      wsRef.current = null
+      // Only close if connection is open to avoid warnings
+      if (currentWs.readyState === WebSocket.OPEN) {
+        currentWs.close()
+      }
+      // For CONNECTING, just nullify reference - browser will abort
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -170,11 +177,14 @@ export function useLogStream({
       }
       
       if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN || 
-            wsRef.current.readyState === WebSocket.CONNECTING) {
-          wsRef.current.close(1000, 'Component unmounting')
-        }
+        const currentWs = wsRef.current
         wsRef.current = null
+        
+        // Only close if connection is open to avoid warnings
+        if (currentWs.readyState === WebSocket.OPEN) {
+          currentWs.close(1000, 'Component unmounting')
+        }
+        // For CONNECTING, just nullify reference - browser will abort
       }
     }
   }, [fetchLogs, setupWebSocket])

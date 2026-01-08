@@ -34,10 +34,10 @@ func NewClient(ctx context.Context, projectDir string) (*Client, error) {
 	configClient, err := azdconfig.NewClient(ctx)
 	if err == nil {
 		defer configClient.Close()
-		port, err := configClient.GetDashboardPort(projectHash)
-		if err == nil && port > 0 {
+		dashboardPort, portErr := configClient.GetDashboardPort(projectHash)
+		if portErr == nil && dashboardPort > 0 {
 			return &Client{
-				baseURL: fmt.Sprintf("http://localhost:%d", port),
+				baseURL: fmt.Sprintf("http://localhost:%d", dashboardPort),
 				httpClient: &http.Client{
 					Timeout: constants.DashboardAPITimeout,
 				},
@@ -293,6 +293,167 @@ func (c *Client) StreamLogs(ctx context.Context, serviceName string, logs chan<-
 			}
 
 			// Send to channel (non-blocking with timeout)
+			select {
+			case logs <- entry:
+			case <-time.After(100 * time.Millisecond):
+				// Drop if channel is full/slow
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
+
+// GetAzureLogs retrieves Azure logs from the dashboard's /api/azure/logs endpoint.
+// The services parameter filters logs to specific services (nil for all services).
+// The tail parameter limits the number of logs returned.
+// The since parameter filters logs to those after the specified time.
+func (c *Client) GetAzureLogs(ctx context.Context, services []string, tail int, since time.Time) ([]service.LogEntry, error) {
+	// Build URL with query parameters
+	url := c.baseURL + "/api/azure/logs"
+	params := []string{}
+
+	if len(services) == 1 {
+		params = append(params, "service="+services[0])
+	}
+	if tail > 0 {
+		params = append(params, fmt.Sprintf("tail=%d", tail))
+	}
+	// Note: since is handled by filtering results client-side for now
+	// The API doesn't support since parameter directly
+
+	if len(params) > 0 {
+		url += "?" + strings.Join(params, "&")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("dashboard returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var logs []service.LogEntry
+	if err := json.NewDecoder(resp.Body).Decode(&logs); err != nil {
+		return nil, fmt.Errorf("failed to decode logs: %w", err)
+	}
+
+	// Filter by services if multiple specified
+	if len(services) > 1 {
+		serviceSet := make(map[string]bool)
+		for _, s := range services {
+			serviceSet[s] = true
+		}
+		filtered := make([]service.LogEntry, 0, len(logs))
+		for _, log := range logs {
+			if serviceSet[log.Service] {
+				filtered = append(filtered, log)
+			}
+		}
+		logs = filtered
+	}
+
+	// Filter by since time if specified
+	if !since.IsZero() {
+		filtered := make([]service.LogEntry, 0, len(logs))
+		for _, log := range logs {
+			if !log.Timestamp.Before(since) {
+				filtered = append(filtered, log)
+			}
+		}
+		logs = filtered
+	}
+
+	return logs, nil
+}
+
+// GetAzureStatus retrieves the Azure connection status from the dashboard.
+// Checks if Azure logging is configured in azure.yaml.
+func (c *Client) GetAzureStatus(ctx context.Context) (*service.AzureStatus, error) {
+	// Check if Azure services are available (indicates Azure is configured)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/azure/services", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check Azure status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Azure not configured
+		return &service.AzureStatus{
+			Mode:      service.LogModeLocal,
+			Connected: false,
+			Enabled:   false,
+		}, nil
+	}
+
+	// Try to read response
+	var result struct {
+		Services []string `json:"services"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && len(result.Services) > 0 {
+		// Azure services found - enabled
+		return &service.AzureStatus{
+			Mode:      service.LogModeAzure,
+			Connected: true,
+			Enabled:   true,
+		}, nil
+	}
+
+	// No services but API responded - Azure configured but no deployments yet
+	return &service.AzureStatus{
+		Mode:      service.LogModeLocal,
+		Connected: false,
+		Enabled:   true,
+	}, nil
+}
+
+// StreamAzureLogs connects to the dashboard's Azure log stream via WebSocket.
+// The function blocks until the context is cancelled or an error occurs.
+func (c *Client) StreamAzureLogs(ctx context.Context, logs chan<- service.LogEntry) error {
+	// Build WebSocket URL
+	wsURL := c.GetWebSocketURL() + "/api/azure/logs/stream"
+
+	// Connect to WebSocket with timeout
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Azure log stream: %w", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "client closing")
+
+	// Read log entries from WebSocket
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			var entry service.LogEntry
+			if err := wsjson.Read(ctx, conn, &entry); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+					return nil
+				}
+				return fmt.Errorf("failed to read Azure log entry: %w", err)
+			}
+
 			select {
 			case logs <- entry:
 			case <-time.After(100 * time.Millisecond):

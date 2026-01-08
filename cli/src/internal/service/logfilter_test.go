@@ -136,48 +136,6 @@ func TestNewLogFilterWithBuiltins_CustomPatterns(t *testing.T) {
 	}
 }
 
-func TestLogFilterConfig_ShouldIncludeBuiltins(t *testing.T) {
-	tests := []struct {
-		name   string
-		config *LogFilterConfig
-		want   bool
-	}{
-		{
-			name:   "nil config",
-			config: nil,
-			want:   true,
-		},
-		{
-			name:   "nil includeBuiltins",
-			config: &LogFilterConfig{},
-			want:   true,
-		},
-		{
-			name: "includeBuiltins true",
-			config: &LogFilterConfig{
-				IncludeBuiltins: boolPtr(true),
-			},
-			want: true,
-		},
-		{
-			name: "includeBuiltins false",
-			config: &LogFilterConfig{
-				IncludeBuiltins: boolPtr(false),
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.ShouldIncludeBuiltins()
-			if got != tt.want {
-				t.Errorf("ShouldIncludeBuiltins() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLogFilterConfig_BuildLogFilter(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -192,22 +150,23 @@ func TestLogFilterConfig_BuildLogFilter(t *testing.T) {
 			shouldFilter: true,
 		},
 		{
-			name:         "config with builtins",
-			config:       &LogFilterConfig{IncludeBuiltins: boolPtr(true)},
+			name:         "empty config uses builtins",
+			config:       &LogFilterConfig{},
 			testMessage:  "npm warn Unknown env config",
 			shouldFilter: true,
 		},
 		{
-			name:         "config without builtins",
-			config:       &LogFilterConfig{IncludeBuiltins: boolPtr(false)},
+			name: "config with custom patterns also includes builtins",
+			config: &LogFilterConfig{
+				Exclude: []string{"custom pattern"},
+			},
 			testMessage:  "npm warn Unknown env config",
-			shouldFilter: false,
+			shouldFilter: true,
 		},
 		{
-			name: "config with custom patterns",
+			name: "config with custom patterns filters custom",
 			config: &LogFilterConfig{
-				Exclude:         []string{"custom pattern"},
-				IncludeBuiltins: boolPtr(false),
+				Exclude: []string{"custom pattern"},
 			},
 			testMessage:  "this has custom pattern",
 			shouldFilter: true,
@@ -396,4 +355,83 @@ func TestLogsConfig_GetFilters(t *testing.T) {
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+func TestLogsConfig_GetClassifications(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *LogsConfig
+		wantLen int
+	}{
+		{
+			name:    "nil config",
+			config:  nil,
+			wantLen: 0,
+		},
+		{
+			name:    "empty config",
+			config:  &LogsConfig{},
+			wantLen: 0,
+		},
+		{
+			name: "config with classifications",
+			config: &LogsConfig{
+				Classifications: []LogClassification{
+					{Text: "error", Level: "error"},
+				},
+			},
+			wantLen: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.GetClassifications()
+			if len(got) != tt.wantLen {
+				t.Errorf("GetClassifications() len = %d, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestValidateClassificationLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  bool
+	}{
+		{
+			name:  "valid level - info",
+			level: "info",
+			want:  true,
+		},
+		{
+			name:  "valid level - warning",
+			level: "warning",
+			want:  true,
+		},
+		{
+			name:  "valid level - error",
+			level: "error",
+			want:  true,
+		},
+		{
+			name:  "invalid level",
+			level: "invalid",
+			want:  false,
+		},
+		{
+			name:  "empty level",
+			level: "",
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidateClassificationLevel(tt.level)
+			if got != tt.want {
+				t.Errorf("ValidateClassificationLevel(%q) = %v, want %v", tt.level, got, tt.want)
+			}
+		})
+	}
 }

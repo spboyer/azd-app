@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Download, Trash2, Pause, Play, ArrowDown } from 'lucide-react'
+import { Search, Download, Trash2, Pause, Play, ArrowDown, Monitor, Cloud, Loader2 } from 'lucide-react'
 import { formatLogTimestamp } from '@/lib/service-utils'
 import { cn } from '@/lib/utils'
 import { useCodespaceEnv } from '@/hooks/useCodespaceEnv'
 import type { Service } from '@/types'
+import type { LogMode } from './ModeToggle'
 import {
   MAX_LOGS_IN_MEMORY,
   INITIAL_LOG_TAIL,
@@ -41,6 +42,21 @@ interface LogsViewProps {
   clearAllTrigger?: number
   /** Hide internal controls when parent provides them */
   hideControls?: boolean
+  /** Current log source mode (local or azure) */
+  logMode?: LogMode
+  /** Whether mode is currently being switched */
+  isModeSwitching?: boolean
+  /** Azure service filter (only used in Azure mode) */
+  azureServiceFilter?: string
+
+  /** Azure timeframe preset (only used in Azure mode) */
+  timeRange?: { preset: '15m' | '30m' | '6h' | '24h' }
+
+  /** Azure polling refresh interval in milliseconds (only used when azureRealtime is false) */
+  syncInterval?: number
+
+  /** Whether to use WebSocket realtime streaming for Azure logs */
+  azureRealtime?: boolean
 }
 
 export function LogsView({ 
@@ -52,6 +68,12 @@ export function LogsView({
   globalSearchTerm,
   clearAllTrigger = 0,
   hideControls = false,
+  logMode = 'local',
+  isModeSwitching = false,
+  azureServiceFilter = '',
+  timeRange,
+  syncInterval,
+  azureRealtime = false,
 }: LogsViewProps = {}) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [internalServices, setInternalServices] = useState<string[]>([])
@@ -60,10 +82,12 @@ export function LogsView({
   const [internalIsPaused, setInternalIsPaused] = useState(false)
   const [isUserScrolling, setIsUserScrolling] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
+  const [hasFetched, setHasFetched] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const logsContainerRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const isPausedRef = useRef(false)
+  const lastClearTimeRef = useRef<number>(Date.now() - 1000) // Initialize to 1s in the past
   
   // Get Codespace config for URL transformation in logs
   const { config: codespaceConfig } = useCodespaceEnv()
@@ -102,22 +126,46 @@ export function LogsView({
   }, [servicesProp])
 
   const fetchLogs = useCallback(async () => {
-    const url = selectedService === 'all'
-      ? `/api/logs?tail=${INITIAL_LOG_TAIL}`
-      : `/api/logs?service=${selectedService}&tail=${INITIAL_LOG_TAIL}`
+    const baseEndpoint = logMode === 'azure' ? '/api/azure/logs' : '/api/logs'
+    const serviceValue = (logMode === 'azure' && azureServiceFilter)
+      ? azureServiceFilter
+      : selectedService
+
+    const params = new URLSearchParams({ tail: String(INITIAL_LOG_TAIL) })
+    if (serviceValue !== 'all' && serviceValue !== '') {
+      params.set('service', serviceValue)
+    }
+    if (logMode === 'azure') {
+      params.set('since', timeRange?.preset ?? '15m')
+    }
+
+    const url = `${baseEndpoint}?${params.toString()}`
 
     try {
       const res = await fetch(url)
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`)
       }
-      const data = await res.json() as LogEntry[]
-      setLogs(data ?? [])
+      const data = await res.json() as LogEntry[] | { logs?: LogEntry[] }
+      
+      // Parse response based on mode - Azure returns { logs: [...] }, local returns [...]
+      let logs: LogEntry[]
+      if (logMode === 'azure' && !Array.isArray(data)) {
+        logs = (data as { logs?: LogEntry[] }).logs ?? []
+      } else if (Array.isArray(data)) {
+        logs = data
+      } else {
+        logs = []
+      }
+      
+      setLogs(logs)
     } catch (err) {
-      console.error('Failed to fetch logs:', err)
+      console.error(`Failed to fetch ${logMode} logs:`, err)
       setLogs([])
+    } finally {
+      setHasFetched(true)
     }
-  }, [selectedService])
+  }, [selectedService, logMode, azureServiceFilter, timeRange?.preset])
 
   const setupWebSocket = useCallback(() => {
     // Close existing connection
@@ -125,10 +173,30 @@ export function LogsView({
       wsRef.current.close()
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = selectedService === 'all'
-      ? `${protocol}//${window.location.host}/api/logs/stream`
-      : `${protocol}//${window.location.host}/api/logs/stream?service=${selectedService}`
+    // Azure logs only stream via WebSocket when realtime is enabled.
+    if (logMode === 'azure' && !azureRealtime) {
+      return
+    }
+
+    const protocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const baseStreamEndpoint = logMode === 'azure' ? '/api/azure/logs/stream' : '/api/logs/stream'
+
+    const serviceValue = (logMode === 'azure' && azureServiceFilter)
+      ? azureServiceFilter
+      : selectedService
+
+    const params = new URLSearchParams()
+    if (serviceValue !== 'all' && serviceValue !== '') {
+      params.set('service', serviceValue)
+    }
+    if (logMode === 'azure') {
+      params.set('realtime', 'true')
+    }
+
+    const query = params.toString()
+    const url = query.length > 0
+      ? `${protocol}//${globalThis.location.host}${baseStreamEndpoint}?${query}`
+      : `${protocol}//${globalThis.location.host}${baseStreamEndpoint}`
 
     const ws = new WebSocket(url)
 
@@ -141,6 +209,11 @@ export function LogsView({
       if (isPausedRef.current) {
         return
       }
+      // Ignore messages received within 100ms of a clear operation
+      // This prevents race conditions where in-flight messages appear after clear
+      if (Date.now() - lastClearTimeRef.current < 100) {
+        return
+      }
       try {
         const entry = JSON.parse(event.data) as LogEntry
         setLogs(prev => [...prev, entry].slice(-MAX_LOGS_IN_MEMORY))
@@ -150,7 +223,7 @@ export function LogsView({
     }
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
+      console.error(`WebSocket error (${logMode}):`, error)
     }
 
     ws.onclose = () => {
@@ -158,17 +231,41 @@ export function LogsView({
     }
 
     wsRef.current = ws
-  }, [selectedService]) // Removed isPaused - WebSocket shouldn't reconnect on pause toggle
+  }, [selectedService, logMode, azureServiceFilter, azureRealtime]) // Reconnect when mode/filter changes
 
-  // Fetch initial logs and setup WebSocket
+  // Fetch initial logs and setup WebSocket (when applicable)
   useEffect(() => {
     void fetchLogs()
-    void setupWebSocket()
+    setupWebSocket()
 
     return () => {
       wsRef.current?.close()
     }
-  }, [fetchLogs, setupWebSocket, selectedService])
+  }, [fetchLogs, setupWebSocket])
+
+  // Azure polling (non-realtime): periodically refetch logs.
+  useEffect(() => {
+    if (logMode !== 'azure') return
+    if (azureRealtime) return
+    if (!syncInterval || syncInterval <= 0) return
+    if (isPaused) return
+
+    const intervalMs = Math.max(1000, syncInterval)
+    const id = globalThis.setInterval(() => {
+      void fetchLogs()
+    }, intervalMs)
+
+    return () => {
+      globalThis.clearInterval(id)
+    }
+  }, [logMode, azureRealtime, syncInterval, isPaused, fetchLogs])
+
+  // Clear logs when mode/filter/timeframe changes
+  useEffect(() => {
+    lastClearTimeRef.current = Date.now()
+    setLogs([]) // Clear logs when switching modes or changing filter
+    setHasFetched(false) // Reset loading state
+  }, [logMode, azureServiceFilter, timeRange?.preset])
 
   // Auto-scroll to bottom - scroll the container, not the page
   // Pause auto-scroll when user is hovering over the logs
@@ -182,6 +279,8 @@ export function LogsView({
   // Clear logs when global clear is triggered
   useEffect(() => {
     if (clearAllTrigger > 0) {
+      // Record clear time to ignore WebSocket messages for a brief period
+      lastClearTimeRef.current = Date.now()
       setLogs([])
     }
   }, [clearAllTrigger])
@@ -255,6 +354,7 @@ export function LogsView({
 
   const clearLogs = useCallback(() => {
     if (window.confirm(`Clear all ${logs.length} log entries? This cannot be undone.`)) {
+      lastClearTimeRef.current = Date.now()
       setLogs([])
     }
   }, [logs.length])
@@ -340,6 +440,37 @@ export function LogsView({
         </div>
       )}
 
+      {/* Log Source Mode Indicator */}
+      <div 
+        className={cn(
+          "flex items-center gap-2 px-3 py-1.5 text-xs font-medium border-b rounded-t-lg transition-colors",
+          logMode === 'azure' 
+            ? "bg-azure-50 dark:bg-azure-900/30 text-azure-700 dark:text-azure-300 border-azure-200 dark:border-azure-700"
+            : "bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+        )}
+      >
+        {isModeSwitching ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span>Switching to {logMode === 'azure' ? 'Azure' : 'Local'} logs...</span>
+          </>
+        ) : logMode === 'azure' ? (
+          <>
+            <Cloud className="w-3.5 h-3.5" />
+            <span>Viewing Azure Logs</span>
+            <span className="text-azure-500 dark:text-azure-400">•</span>
+            <span className="text-azure-500/70 dark:text-azure-400/70">Live from Azure resources</span>
+          </>
+        ) : (
+          <>
+            <Monitor className="w-3.5 h-3.5" />
+            <span>Viewing Local Logs</span>
+            <span className="text-slate-400 dark:text-slate-500">•</span>
+            <span className="text-slate-500/70 dark:text-slate-400/70">From local development server</span>
+          </>
+        )}
+      </div>
+
       {/* Log Display */}
       <div 
         ref={logsContainerRef}
@@ -347,18 +478,30 @@ export function LogsView({
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
         className={cn(
-          "bg-card border rounded-lg p-4 overflow-y-auto font-mono text-sm",
+          "bg-card border rounded-b-lg p-4 overflow-y-auto font-mono text-sm",
           hideControls ? "flex-1" : "h-[600px]"
         )}
+        role="log"
+        aria-live="polite"
+        aria-atomic="false"
       >
-        {filteredLogs.length === 0 ? (
+        {(isModeSwitching || !hasFetched) && filteredLogs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mb-2" />
+            <div className="text-sm">
+              {logMode === 'azure' ? 'Fetching Azure logs...' : 'Fetching local logs...'}
+            </div>
+          </div>
+        ) : filteredLogs.length === 0 ? (
           <div className="text-center text-muted-foreground py-12">
             {logs.length === 0 ? 'No logs to display' : 'No logs match your search'}
           </div>
         ) : (
-          <div className="space-y-0.5">
-            {filteredLogs.map((log, idx) => (
-              <div key={idx} className={getLogColor(log)}>
+          <div className="space-y-0.5 pb-4">
+            {filteredLogs.map((log, idx) => {
+              const key = `${log?.timestamp ?? ''}-${log?.service ?? 'unknown'}-${idx}`
+              return (
+              <div key={key} className={cn(getLogColor(log), "select-text")}>
                 <span className="text-muted-foreground text-xs">
                   [{formatLogTimestamp(String(log?.timestamp ?? ''))}]
                 </span>
@@ -368,12 +511,14 @@ export function LogsView({
                 </span>
                 {' '}
                 <span 
+                  className="text-foreground"
                   dangerouslySetInnerHTML={{ 
                     __html: convertAnsiToHtml(log?.message ?? '', codespaceConfig) 
                   }} 
                 />
               </div>
-            ))}
+              )
+            })}
             <div ref={logsEndRef} />
           </div>
         )}

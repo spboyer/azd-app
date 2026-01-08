@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jongio/azd-app/cli/src/internal/constants"
 )
 
 func TestPortHealthCheck_Success(t *testing.T) {
@@ -183,9 +185,9 @@ func TestWaitForPort_Success(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
-		port := server.Listener.Addr().(*net.TCPAddr).Port
-		serverReady <- port
-		time.Sleep(2 * time.Second)
+		serverPort := server.Listener.Addr().(*net.TCPAddr).Port
+		serverReady <- serverPort
+		time.Sleep(constants.TestShortSleepDuration)
 		server.Close()
 	}()
 
@@ -229,7 +231,7 @@ func TestPerformHealthCheck_PortType(t *testing.T) {
 		Name: "test-service",
 		HealthCheck: HealthCheckConfig{
 			Type:     "port",
-			Timeout:  5 * time.Second,
+			Timeout:  constants.TestServiceTimeout,
 			Interval: 500 * time.Millisecond,
 		},
 	}
@@ -272,7 +274,7 @@ func TestPerformHealthCheck_HTTPType(t *testing.T) {
 		HealthCheck: HealthCheckConfig{
 			Type:     "http",
 			Path:     "/health",
-			Timeout:  5 * time.Second,
+			Timeout:  constants.TestServiceTimeout,
 			Interval: 500 * time.Millisecond,
 		},
 	}

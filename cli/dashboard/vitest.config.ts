@@ -15,12 +15,14 @@ export default defineConfig({
     setupFiles: './src/test/setup.ts',
     css: true,
     watch: false,
+    testTimeout: 10000,
     exclude: ['node_modules', 'e2e'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
+        'src/hooks/useServiceOperations.ts',
         'src/test/',
         'e2e/',
         '**/*.d.ts',

@@ -6,11 +6,84 @@ This document tracks improvements identified during code review, organized by pr
 
 ## 🔴 HIGH PRIORITY
 
-*All high priority items have been completed.*
+### Request: azd Extension Framework Auth Service for Custom Scopes
+
+**Status:** Blocked (upstream dependency)  
+**Priority:** High  
+**Effort:** N/A (external)
+
+**Description**
+The azd extension framework provides `AZD_ACCESS_TOKEN` for gRPC communication, but this token is scoped to Azure Resource Manager (`management.azure.com`). Extensions that need to call other Azure APIs (like Log Analytics `api.loganalytics.io`) cannot use this token.
+
+**Ask for azd Core Team**
+Add a gRPC service to request tokens with custom scopes:
+
+```protobuf
+service AuthService {
+  rpc GetToken(GetTokenRequest) returns (GetTokenResponse);
+}
+
+message GetTokenRequest {
+  repeated string scopes = 1;  // e.g., ["https://api.loganalytics.io/.default"]
+}
+
+message GetTokenResponse {
+  string token = 1;
+  string expires_on = 2;  // RFC3339
+}
+```
+
+**Current Workaround**
+Using `DefaultAzureCredential` which relies on Azure CLI credentials from `azd auth login`. This works but bypasses the extension framework's auth model.
+
+**Impact**
+- Azure Logs feature must use `DefaultAzureCredential` instead of native extension auth
+- Inconsistent credential handling between ARM calls and Log Analytics calls
+- Cannot leverage azd's token caching/refresh for non-ARM APIs
+
+**Related Files**
+- `cli/src/internal/azure/credentials.go` - `NewLogAnalyticsCredential()` workaround
 
 ---
 
 ## ⚠️ MEDIUM PRIORITY
+
+### Enhanced CLI Output Styling
+
+**Status:** Research Complete  
+**Priority:** Medium  
+**Effort:** Medium (phased implementation)
+
+**Description**
+Enhance CLI output styling to match the polish of tools like pnpm and Astro using available Go libraries.
+
+**Research**
+See [CLI Output Styling Research](../research/cli-output-styling.md) for detailed comparison of JavaScript/TypeScript libraries (chalk, piccolore) vs Go libraries (lipgloss, go-pretty, spinner).
+
+**Current State**
+- ✅ Using `fatih/color` for basic colors
+- ✅ Using `charmbracelet/lipgloss` for advanced styling
+- ✅ Unicode symbols with ASCII fallbacks
+- ✅ Custom progress bars and status badges
+- ✅ Service logger color wheel
+
+**Recommended Enhancements**
+1. **Badge Styles**: Use lipgloss for pnpm-style background color badges
+2. **Enhanced Progress**: Colored block characters with lipgloss styling
+3. **Styled Tables**: Add `jedib0t/go-pretty/v6` for better table formatting
+4. **Spinners**: Add `briandowns/spinner` for long operations
+5. **Box Messages**: Use lipgloss borders for important notices
+
+**Implementation Phases**
+- Phase 1: Leverage existing lipgloss for badges and boxes (quick wins)
+- Phase 2: Add go-pretty and spinner libraries
+- Phase 3: Standardize color palette and refactor output functions
+
+**Related Files**
+- `cli/src/internal/output/output.go` - Main output functions
+- `cli/src/internal/service/logger.go` - Service logger with color wheel
+
+---
 
 ### MCP Tool for Azure YAML Configuration
 
@@ -101,6 +174,139 @@ services:
 - Enables AI-assisted configuration
 - Reduces manual azure.yaml editing errors
 - Leverages full schema capabilities
+
+### Azure Logs Refresh Interval Control
+
+**Status:** Deferred (wait for user feedback)
+**Priority:** Medium
+**Effort:** Low (2-3 hours)
+
+**Description**
+Add user-configurable refresh interval for Azure Log Analytics polling (currently hardcoded to 5 seconds). The refresh interval dropdown (5s/10s/30s/1m/5m) was intentionally removed during log streaming simplification, but may be valuable for API cost management and power user scenarios.
+
+**Benefits**
+- **Cost control**: Users with high-traffic services can reduce Log Analytics API calls by polling less frequently (30s, 1m)
+- **Power users**: Critical debugging sessions might benefit from faster than 5s polling
+- **User control**: Configurability improves UX for different scenarios (development vs production monitoring)
+
+**Implementation**
+1. Add `syncInterval` query parameter to `/api/azure/logs/stream` WebSocket endpoint
+2. Pass interval to backend polling ticker in `streamAzureLogsViaPolling()`
+3. Add refresh interval dropdown back to ConsoleToolbar with localStorage persistence
+4. Only show dropdown when in Azure mode with Log Analytics (not Container Apps streaming)
+5. Clamp values between 5s (min) and 5m (max) as per original spec
+
+**Location**
+- Frontend: `cli/dashboard/src/components/ConsoleToolbar.tsx`
+- Frontend hook: `cli/dashboard/src/hooks/useConsoleSyncSettings.ts`
+- Backend: `cli/src/internal/dashboard/azure_logs_stream.go`
+
+**Rationale for Deferral**
+- 5-second polling is already quite responsive for most use cases
+- Container Apps native streaming doesn't need it (real-time)
+- Adds UI complexity
+- Ship without it initially, add if users request it
+
+**Note**: Original code exists in git history from before log streaming simplification refactoring.
+
+---
+
+### Historical Azure Logs + Custom KQL
+
+**Status:** Deferred (backend gap)
+**Priority:** Medium
+**Effort:** Medium
+
+**Description**
+Re-enable historical Azure log queries and custom KQL once a backend query endpoint exists (e.g., `/api/azure/logs/query`) with time range support. Current UI and hooks were removed because the route never shipped and time range parameters were ignored.
+
+**Needed**
+- Add server route for historical queries with pagination and timespan handling.
+- Re-introduce dashboard components for time range selection/KQL input wired to the new route.
+- Tests for query execution, pagination, and empty/error states.
+
+---
+
+### Azure Logs: Resource Discovery Improvements
+
+**Status:** Deferred (needs clarification)
+**Priority:** Medium
+**Effort:** Low (2 hours)
+
+**Description**
+Fix multi-word service name normalization and add validation warnings when azd services don't map to Azure resources.
+
+**Current Behavior**
+The `normalizeServiceName()` function in `cli/src/internal/azure/loganalytics.go` converts underscores to hyphens for environment variable format. However, this may fail for multi-word service names.
+
+**Proposed Implementation**
+1. Add debug logging for all resource mapping attempts
+2. Add validation warnings when service names don't map to Azure resources
+3. Review if underscore → hyphen conversion is correct for all cases
+4. Preserve original service names when possible
+
+**Location**
+- `cli/src/internal/azure/loganalytics.go` - `normalizeServiceName()` function
+- `cli/src/internal/dashboard/azure_logs.go` - Resource discovery logic
+
+**Rationale for Deferral**
+- Current hyphen conversion appears intentional for environment variable format
+- No concrete bug example provided
+- Needs real-world test case showing actual failure
+- Wait for user bug report with reproduction steps
+
+**Related**
+Part of Azure Logs reliability improvements spec (Task 8/10)
+
+---
+
+### Azure Logs: File Rotation Race Condition
+
+**Status:** Deferred (rare edge case)
+**Priority:** Low
+**Effort:** Low (1 hour)
+
+**Description**
+Add atomic file locking during `.azd/logs/` rotation to prevent rare corruption when multiple processes write simultaneously.
+
+**Current State**
+Log file writes in `cli/src/internal/service/logger.go` don't use explicit file locking. When multiple processes (e.g., parallel service startup) write to the same log file during rotation, there's a theoretical risk of corruption.
+
+**Proposed Implementation**
+```go
+import "syscall"
+
+// Add file locking wrapper
+func (w *RotatingWriter) Write(p []byte) (n int, err error) {
+    w.mu.Lock()
+    defer w.mu.Unlock()
+    
+    // Acquire exclusive file lock
+    if err := syscall.Flock(int(w.file.Fd()), syscall.LOCK_EX); err != nil {
+        return 0, err
+    }
+    defer syscall.Flock(int(w.file.Fd()), syscall.LOCK_UN)
+    
+    // Write to file
+    return w.file.Write(p)
+}
+```
+
+**Alternative**
+Use `sync.Mutex` at package level for cross-process coordination, or atomic file operations with temporary files + rename.
+
+**Location**
+- `cli/src/internal/service/logger.go` - RotatingWriter implementation
+
+**Rationale for Deferral**
+- Never observed in practice
+- Very rare edge case (requires concurrent rotation)
+- Current `sync.Mutex` provides process-level safety
+- Only affects high-concurrency scenarios
+- Low user impact
+
+**Related**
+Part of Azure Logs reliability improvements spec (Task 9/10)
 
 ---
 

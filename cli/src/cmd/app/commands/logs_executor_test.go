@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jongio/azd-app/cli/src/internal/azure"
 	"github.com/jongio/azd-app/cli/src/internal/service"
 	"github.com/jongio/azd-app/cli/src/internal/serviceinfo"
 )
@@ -20,11 +21,15 @@ import (
 
 // mockDashboardClient implements DashboardClient for testing.
 type mockDashboardClient struct {
-	pingErr        error
-	services       []*serviceinfo.ServiceInfo
-	getServicesErr error
-	streamLogsErr  error
-	logEntries     []service.LogEntry
+	pingErr           error
+	services          []*serviceinfo.ServiceInfo
+	getServicesErr    error
+	streamLogsErr     error
+	logEntries        []service.LogEntry
+	azureLogs         []service.LogEntry
+	getAzureLogsErr   error
+	azureStatus       *service.AzureStatus
+	getAzureStatusErr error
 }
 
 func (m *mockDashboardClient) Ping(ctx context.Context) error {
@@ -46,6 +51,35 @@ func (m *mockDashboardClient) StreamLogs(ctx context.Context, serviceName string
 	// Keep streaming until context is cancelled (simulating real stream behavior)
 	<-ctx.Done()
 	return m.streamLogsErr
+}
+
+func (m *mockDashboardClient) GetAzureLogs(ctx context.Context, services []string, tail int, since time.Time) ([]service.LogEntry, error) {
+	if m.getAzureLogsErr != nil {
+		return nil, m.getAzureLogsErr
+	}
+	return m.azureLogs, nil
+}
+
+func (m *mockDashboardClient) GetAzureStatus(ctx context.Context) (*service.AzureStatus, error) {
+	if m.getAzureStatusErr != nil {
+		return nil, m.getAzureStatusErr
+	}
+	if m.azureStatus == nil {
+		return &service.AzureStatus{Enabled: false}, nil
+	}
+	return m.azureStatus, nil
+}
+
+func (m *mockDashboardClient) StreamAzureLogs(ctx context.Context, logs chan<- service.LogEntry) error {
+	for _, entry := range m.azureLogs {
+		select {
+		case logs <- entry:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	<-ctx.Done()
+	return nil
 }
 
 // mockLogManager implements LogManagerInterface for testing.
@@ -590,4 +624,53 @@ func TestLogsExecutor_Execute(t *testing.T) {
 			t.Errorf("Expected 5 lines with tail=5, got %d", len(lines))
 		}
 	})
+}
+
+func TestLogsExecutor_AzureStandaloneFallback(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "logs_test_*")
+	defer os.RemoveAll(tmpDir)
+
+	// Stub standalone fetcher
+	originalFetch := fetchAzureLogsStandalone
+	called := false
+	fetchAzureLogsStandalone = func(ctx context.Context, config azure.StandaloneLogsConfig) ([]azure.LogEntry, error) {
+		called = true
+		if len(config.Services) != 1 || config.Services[0] != "api" {
+			t.Fatalf("expected service filter [api], got %v", config.Services)
+		}
+		return []azure.LogEntry{{
+			Service:   "api",
+			Message:   "hello from azure",
+			Level:     azure.LogLevelInfo,
+			Timestamp: time.Now(),
+		}}, nil
+	}
+	defer func() { fetchAzureLogsStandalone = originalFetch }()
+
+	var buf bytes.Buffer
+	opts := &logsOptions{tail: 50, level: "all", format: "text", timestamps: true, noColor: true, source: "azure"}
+
+	executor := newLogsExecutorForTest(
+		func(ctx context.Context, projectDir string) (DashboardClient, error) {
+			return nil, errors.New("dashboard not running")
+		},
+		func(projectDir string) LogManagerInterface {
+			return newMockLogManager()
+		},
+		func() (string, error) { return tmpDir, nil },
+		&buf,
+		opts,
+	)
+
+	if err := executor.execute(context.Background(), []string{"api"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected standalone Azure fetch to be called")
+	}
+
+	if !strings.Contains(buf.String(), "hello from azure") {
+		t.Fatalf("expected output to contain Azure log message, got: %s", buf.String())
+	}
 }

@@ -1,11 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { convertAnsiToHtml, isErrorLine, isWarningLine, getLogLevel, getServiceColor, getLogColor } from './log-utils'
+import { convertAnsiToHtml, isErrorLine, isWarningLine, getLogLevel, getServiceColor, getLogColor, stripEmbeddedTimestamp } from './log-utils'
 
 describe('log-utils', () => {
   describe('convertAnsiToHtml', () => {
     it('should convert plain text', () => {
       const result = convertAnsiToHtml('Hello World')
       expect(result).toBe('Hello World')
+    })
+
+    it('should detect theme and use appropriate colors', () => {
+      // Test light mode (default, no 'dark' class)
+      document.documentElement.classList.remove('dark')
+      const lightResult = convertAnsiToHtml('\x1b[31mError\x1b[0m')
+      expect(lightResult).toBeTruthy()
+      
+      // Test dark mode
+      document.documentElement.classList.add('dark')
+      const darkResult = convertAnsiToHtml('\x1b[31mError\x1b[0m')
+      expect(darkResult).toBeTruthy()
+      
+      // Cleanup
+      document.documentElement.classList.remove('dark')
     })
 
     it('should escape HTML special characters', () => {
@@ -179,6 +194,69 @@ describe('log-utils', () => {
 
     it('should return tertiary for info', () => {
       expect(getLogColor('info')).toBe('text-foreground-tertiary')
+    })
+  })
+
+  describe('stripEmbeddedTimestamp', () => {
+    it('should strip ISO 8601 timestamps with brackets', () => {
+      const result = stripEmbeddedTimestamp('[2025-12-13T05:45:49.1071934-08:00] [appservice-web] [INFO] Health endpoint hit')
+      expect(result).toBe('[INFO] Health endpoint hit')
+    })
+
+    it('should strip date time timestamps with brackets', () => {
+      const result = stripEmbeddedTimestamp('[2025-12-13 05:45:49] [INFO] GET / - 200')
+      expect(result).toBe('[INFO] GET / - 200')
+    })
+
+    it('should strip time only timestamps with brackets', () => {
+      const result = stripEmbeddedTimestamp('[05:45:49] Server started')
+      expect(result).toBe('Server started')
+    })
+
+    it('should strip time with milliseconds', () => {
+      const result = stripEmbeddedTimestamp('[08:20:50.670] Request received')
+      expect(result).toBe('Request received')
+    })
+
+    it('should strip service name prefix', () => {
+      const result = stripEmbeddedTimestamp('[appservice-web] GET / endpoint called')
+      expect(result).toBe('GET / endpoint called')
+    })
+
+    it('should strip multiple nested timestamp patterns', () => {
+      // This is the exact pattern from user report
+      const result = stripEmbeddedTimestamp('[2025-12-13T05:45:49.1071934-08:00] [appservice-web] [2025-12-13 05:45:49] [INFO] Health endpoint hit - appservice-web is healthy')
+      expect(result).toBe('[INFO] Health endpoint hit - appservice-web is healthy')
+    })
+
+    it('should preserve messages without timestamps', () => {
+      const result = stripEmbeddedTimestamp('Server started successfully')
+      expect(result).toBe('Server started successfully')
+    })
+
+    it('should preserve log level prefixes', () => {
+      const result = stripEmbeddedTimestamp('[INFO] GET / - 200')
+      expect(result).toBe('[INFO] GET / - 200')
+    })
+
+    it('should handle whitespace before timestamps', () => {
+      const result = stripEmbeddedTimestamp('  [2025-12-13 05:45:49] Server started')
+      expect(result).toBe('Server started')
+    })
+
+    it('should not strip service name when disabled', () => {
+      const result = stripEmbeddedTimestamp('[appservice-web] GET / endpoint called', false)
+      expect(result).toBe('[appservice-web] GET / endpoint called')
+    })
+
+    it('should handle empty strings', () => {
+      const result = stripEmbeddedTimestamp('')
+      expect(result).toBe('')
+    })
+
+    it('should handle timezone offset in ISO timestamps', () => {
+      const result = stripEmbeddedTimestamp('[2025-12-13T16:20:50Z] Request processed')
+      expect(result).toBe('Request processed')
     })
   })
 })

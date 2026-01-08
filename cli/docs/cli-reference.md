@@ -21,6 +21,7 @@ These flags are available for all commands:
 | `--output` | `-o` | string | `default` | Output format (default, json) |
 | `--debug` | | bool | `false` | Enable debug logging |
 | `--structured-logs` | | bool | `false` | Enable structured JSON logging to stderr |
+| `--cwd` | `-C` | string | `""` | Sets the current working directory |
 
 **Examples:**
 ```bash
@@ -32,6 +33,9 @@ azd app run --debug
 
 # Enable structured logs for log aggregation
 azd app deps --structured-logs
+
+# Run from a specific project directory
+azd app run --cwd ./my-project
 ```
 
 ## Commands Overview
@@ -40,6 +44,7 @@ azd app deps --structured-logs
 |---------|-------------|---------------|
 | `reqs` | Check and verify required tools and optionally auto-generate requirements | [→ Full Spec](commands/reqs.md) |
 | `deps` | Install dependencies for detected projects | [→ Full Spec](commands/deps.md) |
+| `add` | Add a well-known container service to azure.yaml | [→ Full Spec](commands/add.md) |
 | `run` | Run the development environment with service orchestration and lifecycle hooks | [→ Full Spec](commands/run.md) |
 | `test` | Run tests for all services with coverage aggregation | [→ Full Spec](commands/test.md) |
 | `start` | Start stopped services | [→ Full Spec](commands/start.md) |
@@ -51,7 +56,8 @@ azd app deps --structured-logs
 | `mcp` | Model Context Protocol server for AI assistant integration | [→ Full Spec](commands/mcp.md) |
 | `notifications` | Manage process notifications for service state changes | [→ Full Spec](commands/notifications.md) |
 | `version` | Show version information | [→ Full Spec](commands/version.md) |
-| `listen` | Extension framework integration (hidden, used by azd internally) | |
+| `completion` | Generate shell autocompletion scripts | [→ Full Spec](commands/completion.md) |
+| `listen` | Extension framework integration (hidden, used by azd internally) | [→ Full Spec](commands/listen.md) |
 
 ---
 
@@ -156,6 +162,9 @@ azd app deps --clean
 
 # Force fresh install (combines --clean and --no-cache)
 azd app deps --force
+
+# Or use run --force to reinstall deps before starting
+azd app run --force
 ```
 
 ### Flags
@@ -187,6 +196,50 @@ azd app deps --force
 This command depends on `reqs` and will automatically run prerequisite checks before installing dependencies.
 
 **→ [See full deps command specification](commands/deps.md)** for package manager detection flows and detailed documentation.
+
+---
+
+## `azd app add`
+
+Add a well-known container service to your azure.yaml configuration.
+
+### Usage
+
+```bash
+azd app add [service] [flags]
+```
+
+### Examples
+
+```bash
+# List available services
+azd app add --list
+
+# Add Azurite storage emulator
+azd app add azurite
+
+# Add PostgreSQL and show connection string
+azd app add postgres --show-connection
+
+# JSON output
+azd app add redis --output json
+```
+
+### Flags
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--list` | | bool | `false` | List all available services |
+| `--show-connection` | | bool | `false` | Show connection string after adding |
+
+### Available Services
+
+- `azurite` - Azure Storage emulator (Blob, Queue, Table)
+- `cosmos` - Azure Cosmos DB emulator
+- `redis` - Redis in-memory cache
+- `postgres` - PostgreSQL database
+
+**→ [See full add command specification](commands/add.md)** for examples and configuration details.
 
 ---
 
@@ -234,6 +287,7 @@ azd app run -s web -v --runtime aspire
 | `--env-file` | | string | | Load environment variables from .env file |
 | `--verbose` | `-v` | bool | `false` | Enable verbose logging |
 | `--dry-run` | | bool | `false` | Show what would be run without starting services |
+| `--restart-containers` | | bool | `false` | Restart containers even if they are already running |
 | `--web` | `-w` | bool | `false` | Open dashboard in browser |
 
 ### Runtime Modes
@@ -243,6 +297,7 @@ azd app run -s web -v --runtime aspire
 - Works with all project types
 - Provides unified experience across languages
 - Service orchestration and monitoring
+- Log source switcher for local/Azure logs
 
 #### aspire
 - Uses native .NET Aspire dashboard via `dotnet run`
@@ -256,7 +311,7 @@ azd app run -s web -v --runtime aspire
 - **.NET Aspire**: Projects with AppHost.cs
 - **Node.js**: pnpm dev/start scripts
 - **Docker Compose**: Container orchestration
-- **Logic Apps Standard**: Azure Logic Apps workflows (see [Logic Apps Support](commands/logicapps-support.md))
+- **Logic Apps Standard**: Azure Logic Apps workflows (see [Azure Functions + Logic Apps](features/azure-functions.md))
 
 ### Service Configuration
 
@@ -267,11 +322,11 @@ name: my-app
 services:
   web:
     language: js
-    host: containerapp
+    host: local
     project: ./src/web
   api:
     language: python
-    host: containerapp
+    host: local
     project: ./src/api
 ```
 
@@ -766,14 +821,26 @@ View logs from running services with filtering and follow support.
 azd app logs [flags]
 ```
 
+### Prerequisites by Source
+
+| Source | Requires `azd app run`? | Notes |
+|--------|-------------------------|-------|
+| `local` (default) | Yes | Services must be running locally |
+| `azure` | **No** | Queries Azure Log Analytics directly |
+| `all` | Yes | Local component requires services |
+
 ### Examples
 
 ```bash
-# View logs from all services
-azd app logs
+# Local logs (requires azd app run)
+azd app run                       # Start services first
+azd app logs                      # View logs from all services
+azd app logs --follow             # Follow logs in real-time
 
-# Follow logs in real-time
-azd app logs --follow
+# Azure logs (standalone - no azd app run required)
+azd app logs --source azure               # View logs from Azure
+azd app logs --source azure -f            # Stream Azure logs (polls every 30s)
+azd app logs --source azure --since 1h    # Logs from last hour
 
 # View logs for specific service(s)
 azd app logs --service web,api
@@ -808,6 +875,7 @@ azd app logs --no-color
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--follow` | `-f` | bool | `false` | Follow log output (tail -f behavior) |
+| `--source` | | string | `local` | Log source: `local`, `azure`, or `all` |
 | `--service` | `-s` | string | | Filter by service name(s) (comma-separated) |
 | `--tail` | `-n` | int | `100` | Number of lines to show from the end |
 | `--since` | | string | | Show logs since duration (e.g., 5m, 1h) |
@@ -819,6 +887,14 @@ azd app logs --no-color
 | `--file` | | string | | Write logs to file instead of stdout |
 | `--exclude` | `-e` | string | | Regex patterns to exclude (comma-separated) |
 | `--no-builtins` | | bool | `false` | Disable built-in filter patterns |
+
+### Log Sources
+
+| Source | Description | Streaming |
+|--------|-------------|-----------|
+| `local` | Logs from locally running services (default) | Real-time via process stdout/stderr |
+| `azure` | Logs from Azure Log Analytics | Polls every 30s (1-5 minute ingestion delay) |
+| `all` | Both local and Azure logs merged | Mixed |
 
 ### Log Levels
 
@@ -842,6 +918,18 @@ Machine-readable JSON format:
 ```json
 {"timestamp":"2024-01-15T10:30:45Z","service":"web","level":"info","message":"Starting server on port 3000"}
 ```
+
+### Dashboard Log Viewer
+
+The dashboard provides a visual log viewer with additional features:
+
+- **Log Source Switcher**: Toggle between local and Azure logs
+  - Local (💻): Logs from locally running services
+  - Azure (☁️): Logs from Azure-deployed services via Log Analytics
+  - Keyboard shortcut: `Ctrl+Shift+M` to toggle modes
+- **Grid/Unified View**: Switch between per-service panes or unified log stream
+- **Real-time Search**: Filter logs as you type
+- **Export**: Download logs in multiple formats
 
 **→ [See full logs command specification](commands/logs.md)** for log streaming flows, filtering mechanisms, and detailed documentation.
 
@@ -1026,6 +1114,48 @@ azd app extension version 0.5.1
 
 ---
 
+## `azd app completion`
+
+Generate shell autocompletion scripts for `azd app`.
+
+### Usage
+
+```bash
+azd app completion [command]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `bash` | Generate the autocompletion script for bash |
+| `fish` | Generate the autocompletion script for fish |
+| `powershell` | Generate the autocompletion script for PowerShell |
+| `zsh` | Generate the autocompletion script for zsh |
+
+### Examples
+
+```bash
+# Bash (add to ~/.bashrc)
+azd app completion bash > ~/.azd-app-completion.bash
+
+# Zsh (add to ~/.zshrc)
+azd app completion zsh > ~/.azd-app-completion.zsh
+
+# PowerShell (current session)
+azd app completion powershell | Out-String | Invoke-Expression
+```
+
+### Flags
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--help` | `-h` | bool | `false` | Show help for completion |
+
+**→ [See full completion command specification](commands/completion.md)** for shell-specific install instructions.
+
+---
+
 ## `azd app notifications`
 
 View and manage notifications for service state changes and events.
@@ -1079,6 +1209,23 @@ azd app notifications enable --disable
 ```
 
 **→ [See full notifications command specification](commands/notifications.md)** for complete subcommand documentation.
+
+---
+
+## `azd app listen`
+
+Start the extension server (internal, required by the azd extension framework).
+
+This command is invoked by `azd` to communicate with the extension over JSON-RPC on stdio.
+It is hidden from `azd app --help` and is not intended to be run directly.
+
+### Usage
+
+```bash
+azd app listen
+```
+
+**→ [See full listen command specification](commands/listen.md)** for integration notes.
 
 ---
 

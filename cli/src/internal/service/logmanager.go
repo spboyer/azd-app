@@ -71,19 +71,13 @@ func loadLogFilterForProject(projectDir string) *LogFilter {
 	// Get filter config from azure.yaml
 	filterConfig := azureYaml.Logs.GetFilters()
 	var customPatterns []string
-	includeBuiltins := true
 
 	if filterConfig != nil {
 		customPatterns = filterConfig.Exclude
-		includeBuiltins = filterConfig.ShouldIncludeBuiltins()
 	}
 
-	var filter *LogFilter
-	if includeBuiltins {
-		filter, _ = NewLogFilterWithBuiltins(customPatterns)
-	} else {
-		filter, _ = NewLogFilter(customPatterns)
-	}
+	// Always include built-in patterns per schema
+	filter, _ := NewLogFilterWithBuiltins(customPatterns)
 	return filter
 }
 

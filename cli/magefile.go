@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,6 +28,14 @@ const (
 	websiteDir         = "../web"
 	defaultTestTimeout = "10m"
 	extensionID        = "jongio.azd.app"
+	goSrcPattern       = "./src/..."
+	goIntegrationTag   = "-tags=integration"
+	errBuildFailedFmt  = "build failed: %w"
+	errPnpmFailedFmt   = "pnpm install failed: %w"
+	fmtBulletItem      = "   • %s\n"
+	fmtTestingProject  = "   Testing %s (%s)...\n"
+	fmtProjectFailed   = "   ❌ %s failed: %v\n"
+	fmtProjectPassed   = "   ✅ %s passed\n"
 )
 
 // Default target runs all checks and builds.
@@ -120,7 +130,7 @@ func Build() error {
 
 	// Build and install directly using azd x build
 	if err := sh.RunWithV(env, "azd", "x", "build"); err != nil {
-		return fmt.Errorf("build failed: %w", err)
+		return fmt.Errorf(errBuildFailedFmt, err)
 	}
 
 	fmt.Printf("✅ Build complete! Version: %s\n", version)
@@ -147,12 +157,12 @@ func buildAllPlatforms() error {
 	if runtime.GOOS == "windows" {
 		buildScript = "build.ps1"
 		if err := sh.RunWithV(env, "pwsh", "-File", buildScript); err != nil {
-			return fmt.Errorf("build failed: %w", err)
+			return fmt.Errorf(errBuildFailedFmt, err)
 		}
 	} else {
 		buildScript = "build.sh"
 		if err := sh.RunWithV(env, "bash", buildScript); err != nil {
-			return fmt.Errorf("build failed: %w", err)
+			return fmt.Errorf(errBuildFailedFmt, err)
 		}
 	}
 
@@ -163,7 +173,7 @@ func buildAllPlatforms() error {
 // Test runs unit tests only (with -short flag).
 func Test() error {
 	fmt.Println("Running unit tests...")
-	return sh.RunV("go", "test", "-v", "-short", "./src/...")
+	return sh.RunV("go", "test", "-v", "-short", goSrcPattern)
 }
 
 // TestIntegration runs integration tests only.
@@ -173,7 +183,7 @@ func Test() error {
 func TestIntegration() error {
 	fmt.Println("Running integration tests...")
 
-	args := []string{"test", "-v", "-tags=integration"}
+	args := []string{"test", "-v", goIntegrationTag}
 
 	// Handle timeout
 	timeout := os.Getenv("TEST_TIMEOUT")
@@ -190,7 +200,7 @@ func TestIntegration() error {
 
 	// Handle package filtering
 	pkg := os.Getenv("TEST_PACKAGE")
-	testPath := "./src/..."
+	testPath := goSrcPattern
 	if pkg != "" {
 		switch pkg {
 		case "installer":
@@ -211,7 +221,7 @@ func TestIntegration() error {
 // TestAll runs all tests (unit + integration).
 func TestAll() error {
 	fmt.Println("Running all tests...")
-	return sh.RunV("go", "test", "-v", "-tags=integration", "./src/...")
+	return sh.RunV("go", "test", "-v", goIntegrationTag, goSrcPattern)
 }
 
 // TestVisual runs visual tests for progress bar rendering at multiple terminal widths.
@@ -282,7 +292,7 @@ func TestE2E() error {
 	args := []string{
 		"test",
 		"-v",
-		"-tags=integration",
+		goIntegrationTag,
 		"-timeout=" + timeout,
 		"./src/cmd/app/commands",
 		"-run=TestHealthCommandE2E",
@@ -319,7 +329,7 @@ func TestCoverage() error {
 	// Use exec.Command to capture output and handle Go version mismatch warnings gracefully
 	// These warnings occur when Go's compiled stdlib doesn't match the go binary version
 	// but don't affect test correctness
-	cmd := exec.Command("go", "test", "-short", "-coverprofile="+coverageOut, "./src/...")
+	cmd := exec.Command("go", "test", "-short", "-coverprofile="+coverageOut, goSrcPattern)
 	output, testErr := cmd.CombinedOutput()
 	fmt.Print(string(output))
 
@@ -423,17 +433,44 @@ func Staticcheck() error {
 // ModTidy ensures go.mod and go.sum are tidy.
 func ModTidy() error {
 	fmt.Println("Running go mod tidy...")
+
+	goModBefore, err := fileHash("go.mod")
+	if err != nil {
+		return fmt.Errorf("failed to read go.mod before tidy: %w", err)
+	}
+	goSumBefore, err := fileHash("go.sum")
+	if err != nil {
+		return fmt.Errorf("failed to read go.sum before tidy: %w", err)
+	}
+
 	if err := sh.RunV("go", "mod", "tidy"); err != nil {
 		return fmt.Errorf("go mod tidy failed: %w", err)
 	}
 
-	// Check if there are any changes
-	if err := sh.RunV("git", "diff", "--exit-code", "go.mod", "go.sum"); err != nil {
-		return fmt.Errorf("go.mod or go.sum has uncommitted changes after running go mod tidy - please review and commit these changes")
+	goModAfter, err := fileHash("go.mod")
+	if err != nil {
+		return fmt.Errorf("failed to read go.mod after tidy: %w", err)
+	}
+	goSumAfter, err := fileHash("go.sum")
+	if err != nil {
+		return fmt.Errorf("failed to read go.sum after tidy: %w", err)
+	}
+
+	if goModBefore != goModAfter || goSumBefore != goSumAfter {
+		return fmt.Errorf("go.mod or go.sum changed after running go mod tidy - please review the changes")
 	}
 
 	fmt.Println("✅ go mod tidy passed!")
 	return nil
+}
+
+func fileHash(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // ModVerify verifies dependencies have expected content.
@@ -517,7 +554,7 @@ func CheckDeps() error {
 		if len(updates) > 0 {
 			fmt.Println("   Available Go module updates:")
 			for _, update := range updates {
-				fmt.Printf("   • %s\n", update)
+				fmt.Printf(fmtBulletItem, update)
 			}
 			hasIssues = true
 		} else {
@@ -544,7 +581,7 @@ func CheckDeps() error {
 		if len(deprecated) > 0 {
 			fmt.Println("   ⚠️  Deprecated Go modules found:")
 			for _, dep := range deprecated {
-				fmt.Printf("   • %s\n", dep)
+				fmt.Printf(fmtBulletItem, dep)
 			}
 			hasIssues = true
 		} else {
@@ -578,33 +615,200 @@ func CheckDeps() error {
 	}
 	fmt.Println()
 
-	// Check for pnpm audit vulnerabilities
+	// Check for pnpm audit vulnerabilities (dashboard)
 	fmt.Println("🔒 Checking dashboard pnpm packages for security vulnerabilities...")
 	auditOutput, auditErr := sh.Output("pnpm", "audit", "--dir", dashboardDir, "--json")
 	if auditErr != nil {
 		// pnpm audit exits with non-zero when vulnerabilities found
 		// Parse the JSON to get a summary
 		if strings.Contains(auditOutput, "\"vulnerabilities\"") {
-			fmt.Println("   ⚠️  Security vulnerabilities found in pnpm packages!")
+			fmt.Println("   ⚠️  Security vulnerabilities found in dashboard packages!")
 			fmt.Println("   Run 'pnpm audit --dir dashboard' for details")
 			fmt.Println("   Run 'pnpm audit --fix --dir dashboard' to fix automatically")
 			hasIssues = true
 		}
 	} else {
-		fmt.Println("   ✅ No known pnpm security vulnerabilities!")
+		fmt.Println("   ✅ No known dashboard security vulnerabilities!")
+	}
+	fmt.Println()
+
+	// Check for pnpm audit vulnerabilities (website)
+	fmt.Println("🔒 Checking website pnpm packages for security vulnerabilities...")
+	websiteAuditOutput, websiteAuditErr := sh.Output("pnpm", "audit", "--dir", websiteDir, "--json")
+	if websiteAuditErr != nil {
+		// pnpm audit exits with non-zero when vulnerabilities found
+		if strings.Contains(websiteAuditOutput, "\"vulnerabilities\"") {
+			fmt.Println("   ⚠️  Security vulnerabilities found in website packages!")
+			fmt.Println("   Run 'pnpm audit --dir ../web' for details")
+			fmt.Println("   Run 'pnpm audit --fix --dir ../web' to fix automatically")
+			hasIssues = true
+		}
+	} else {
+		fmt.Println("   ✅ No known website security vulnerabilities!")
 	}
 	fmt.Println()
 
 	if hasIssues {
-		fmt.Println("💡 Tip: Run 'go get -u ./...' to update Go modules")
-		fmt.Println("💡 Tip: Run 'pnpm update --dir dashboard' to update dashboard packages")
-		fmt.Println("💡 Tip: Run 'pnpm update --dir ../web' to update website packages")
+		fmt.Println("💡 Tip: Run 'mage updateDeps' to update all dependencies")
+		fmt.Println("💡 Tip: Run 'go get -u ./...' to update Go modules only")
+		fmt.Println("💡 Tip: Run 'pnpm update --dir dashboard' to update dashboard packages only")
+		fmt.Println("💡 Tip: Run 'pnpm update --dir ../web' to update website packages only")
 		fmt.Println("⚠️  Dependency updates available (continuing with preflight)")
 	} else {
 		fmt.Println("✅ All dependencies are up to date!")
 	}
 
 	// Don't fail the build - just warn
+	return nil
+}
+
+// UpdateDeps updates all dependencies to their latest versions across the entire project.
+// This includes Go modules, dashboard pnpm packages, and website pnpm packages.
+// Use MINOR_ONLY=true to only update to latest minor versions (safer, avoids breaking changes).
+// Use DRY_RUN=true to preview updates without applying them.
+func UpdateDeps() error {
+	fmt.Println("🔄 Updating all dependencies to latest versions...")
+	fmt.Println()
+
+	minorOnly := os.Getenv("MINOR_ONLY") == "true"
+	dryRun := os.Getenv("DRY_RUN") == "true"
+
+	if dryRun {
+		fmt.Println("🔍 DRY RUN MODE - No changes will be made")
+		fmt.Println()
+	}
+
+	if minorOnly {
+		fmt.Println("📌 MINOR ONLY MODE - Only updating to latest minor versions (safer)")
+		fmt.Println()
+	}
+
+	// Track any errors but continue with other updates
+	var errors []string
+
+	// Update Go modules
+	fmt.Println("📦 Updating Go modules...")
+	if dryRun {
+		// Just show what would be updated
+		if err := sh.RunV("go", "list", "-u", "-m", "all"); err != nil {
+			errors = append(errors, fmt.Sprintf("Go modules check: %v", err))
+		}
+	} else {
+		// Update all Go modules to latest
+		updateCmd := "go"
+		updateArgs := []string{"get", "-u"}
+		if minorOnly {
+			// Update to latest minor/patch but not major
+			updateArgs = append(updateArgs, "-u=patch")
+		}
+		updateArgs = append(updateArgs, "./...")
+
+		if err := sh.RunV(updateCmd, updateArgs...); err != nil {
+			errors = append(errors, fmt.Sprintf("Go modules update: %v", err))
+		} else {
+			// Tidy up after updates
+			if err := sh.RunV("go", "mod", "tidy"); err != nil {
+				errors = append(errors, fmt.Sprintf("go mod tidy: %v", err))
+			} else {
+				fmt.Println("   ✅ Go modules updated and tidied!")
+			}
+		}
+	}
+	fmt.Println()
+
+	// Update dashboard pnpm packages
+	fmt.Println("📦 Updating dashboard pnpm packages...")
+	if dryRun {
+		// Just show what would be updated
+		_, _ = sh.Output("pnpm", "outdated", "--dir", dashboardDir)
+	} else {
+		updateArgs := []string{"update", "--dir", dashboardDir}
+		if minorOnly {
+			// pnpm update respects semver ranges in package.json by default
+			// Use --latest for major updates, omit for minor/patch only
+			fmt.Println("   Using version ranges from package.json (minor/patch updates)")
+		} else {
+			// Update to latest regardless of semver ranges
+			updateArgs = append(updateArgs, "--latest")
+		}
+
+		if err := sh.RunV("pnpm", updateArgs...); err != nil {
+			errors = append(errors, fmt.Sprintf("dashboard pnpm update: %v", err))
+		} else {
+			fmt.Println("   ✅ Dashboard packages updated!")
+		}
+	}
+	fmt.Println()
+
+	// Update website pnpm packages
+	fmt.Println("📦 Updating website pnpm packages...")
+	if dryRun {
+		// Just show what would be updated
+		_, _ = sh.Output("pnpm", "outdated", "--dir", websiteDir)
+	} else {
+		updateArgs := []string{"update", "--dir", websiteDir}
+		if minorOnly {
+			fmt.Println("   Using version ranges from package.json (minor/patch updates)")
+		} else {
+			updateArgs = append(updateArgs, "--latest")
+		}
+
+		if err := sh.RunV("pnpm", updateArgs...); err != nil {
+			errors = append(errors, fmt.Sprintf("website pnpm update: %v", err))
+		} else {
+			fmt.Println("   ✅ Website packages updated!")
+		}
+	}
+	fmt.Println()
+
+	// Fix any security vulnerabilities in pnpm packages
+	if !dryRun {
+		fmt.Println("🔒 Fixing security vulnerabilities...")
+
+		// Dashboard
+		fmt.Println("   Fixing dashboard vulnerabilities...")
+		if err := sh.RunV("pnpm", "audit", "--fix", "--dir", dashboardDir); err != nil {
+			// audit --fix can return non-zero even when successful if unfixable vulns remain
+			fmt.Println("   ⚠️  Some vulnerabilities may remain (manual review needed)")
+		} else {
+			fmt.Println("   ✅ Dashboard vulnerabilities fixed!")
+		}
+
+		// Website
+		fmt.Println("   Fixing website vulnerabilities...")
+		if err := sh.RunV("pnpm", "audit", "--fix", "--dir", websiteDir); err != nil {
+			fmt.Println("   ⚠️  Some vulnerabilities may remain (manual review needed)")
+		} else {
+			fmt.Println("   ✅ Website vulnerabilities fixed!")
+		}
+		fmt.Println()
+	}
+
+	// Summary
+	if len(errors) > 0 {
+		fmt.Println("❌ Some updates failed:")
+		for _, err := range errors {
+			fmt.Printf(fmtBulletItem, err)
+		}
+		fmt.Println()
+		fmt.Println("💡 Review errors above and fix manually if needed")
+		return fmt.Errorf("%d update(s) failed", len(errors))
+	}
+
+	if dryRun {
+		fmt.Println("✅ Dry run complete! No changes were made.")
+		fmt.Println("💡 Run 'mage updateDeps' without DRY_RUN=true to apply updates")
+	} else {
+		fmt.Println("✅ All dependencies updated successfully!")
+		fmt.Println()
+		fmt.Println("📝 Next steps:")
+		fmt.Println("   1. Review changes: git diff")
+		fmt.Println("   2. Test the build: mage build")
+		fmt.Println("   3. Run tests: mage test")
+		fmt.Println("   4. Check for issues: mage lint")
+		fmt.Println("   5. Commit changes: git add . && git commit -m 'chore: update dependencies'")
+	}
+
 	return nil
 }
 
@@ -662,7 +866,7 @@ func Watch() error {
 	// Install dashboard dependencies before starting watcher
 	fmt.Println("📦 Installing dashboard dependencies...")
 	if err := sh.RunV("pnpm", "install", "--dir", dashboardDir); err != nil {
-		return fmt.Errorf("pnpm install failed: %w", err)
+		return fmt.Errorf(errPnpmFailedFmt, err)
 	}
 
 	// Do an initial dashboard build to ensure embedded dist is up-to-date
@@ -808,7 +1012,7 @@ func runQuickSecurity() error {
 		"-confidence=high",
 		"-quiet",
 		"-include=G101,G102,G201,G202,G301,G305,G402,G403",
-		"./src/...",
+		goSrcPattern,
 	); err != nil {
 		fmt.Println("⚠️  Quick security scan found critical issues!")
 		fmt.Println("    Run 'mage security' for a full scan")
@@ -832,7 +1036,7 @@ func runGosec() error {
 		"-fmt=text",
 		"-exclude=G304,G307", // Exclude file paths and deferred error checks (we handle these)
 		"-nosec",             // Respect #nosec comments
-		"./src/...",          // Only scan src directory
+		goSrcPattern,         // Only scan src directory
 	); err != nil {
 		fmt.Println("⚠️  Security scan failed. Ensure gosec is installed:")
 		fmt.Println("    go install github.com/securego/gosec/v2/cmd/gosec@latest")
@@ -850,7 +1054,7 @@ func DashboardBuild() error {
 	// Install dependencies
 	fmt.Println("Installing dashboard dependencies...")
 	if err := sh.RunV("pnpm", "install", "--dir", dashboardDir); err != nil {
-		return fmt.Errorf("pnpm install failed: %w", err)
+		return fmt.Errorf(errPnpmFailedFmt, err)
 	}
 
 	// Run TypeScript compilation and build
@@ -940,7 +1144,7 @@ func WebsiteBuild() error {
 	// Install dependencies
 	fmt.Println("Installing website dependencies...")
 	if err := sh.RunV("pnpm", "install", "--dir", websiteDir); err != nil {
-		return fmt.Errorf("pnpm install failed: %w", err)
+		return fmt.Errorf(errPnpmFailedFmt, err)
 	}
 
 	// Run build (which includes prebuild: validate, generate:cli, generate:changelog)
@@ -959,7 +1163,7 @@ func WebsiteValidate() error {
 
 	// Install dependencies first
 	if err := sh.RunV("pnpm", "install", "--dir", websiteDir); err != nil {
-		return fmt.Errorf("pnpm install failed: %w", err)
+		return fmt.Errorf(errPnpmFailedFmt, err)
 	}
 
 	// Run validation script
@@ -1098,7 +1302,7 @@ func WebsiteScreenshots() error {
 
 	// Install dependencies first
 	if err := sh.RunV("pnpm", "install", "--dir", websiteDir); err != nil {
-		return fmt.Errorf("pnpm install failed: %w", err)
+		return fmt.Errorf(errPnpmFailedFmt, err)
 	}
 
 	// Run screenshot capture script
@@ -1190,12 +1394,12 @@ func TestProjects() error {
 
 		for _, proj := range nodeProjects {
 			projPath := filepath.Join(testProjectsDir, proj.dir)
-			fmt.Printf("   Testing %s (%s)...\n", proj.name, proj.dir)
+			fmt.Printf(fmtTestingProject, proj.name, proj.dir)
 			if err := runNodeTests(projPath); err != nil {
-				fmt.Printf("   ❌ %s failed: %v\n", proj.name, err)
+				fmt.Printf(fmtProjectFailed, proj.name, err)
 				failed = append(failed, proj.name)
 			} else {
-				fmt.Printf("   ✅ %s passed\n", proj.name)
+				fmt.Printf(fmtProjectPassed, proj.name)
 				passed = append(passed, proj.name)
 			}
 		}
@@ -1216,12 +1420,12 @@ func TestProjects() error {
 
 		for _, proj := range pythonProjects {
 			projPath := filepath.Join(testProjectsDir, proj.dir)
-			fmt.Printf("   Testing %s (%s)...\n", proj.name, proj.dir)
+			fmt.Printf(fmtTestingProject, proj.name, proj.dir)
 			if err := runPythonTests(projPath, proj.command); err != nil {
-				fmt.Printf("   ❌ %s failed: %v\n", proj.name, err)
+				fmt.Printf(fmtProjectFailed, proj.name, err)
 				failed = append(failed, proj.name)
 			} else {
-				fmt.Printf("   ✅ %s passed\n", proj.name)
+				fmt.Printf(fmtProjectPassed, proj.name)
 				passed = append(passed, proj.name)
 			}
 		}
@@ -1256,12 +1460,12 @@ func TestProjects() error {
 
 		for _, proj := range goProjects {
 			projPath := filepath.Join(testProjectsDir, proj.dir)
-			fmt.Printf("   Testing %s (%s)...\n", proj.name, proj.dir)
+			fmt.Printf(fmtTestingProject, proj.name, proj.dir)
 			if err := runGoTests(projPath); err != nil {
-				fmt.Printf("   ❌ %s failed: %v\n", proj.name, err)
+				fmt.Printf(fmtProjectFailed, proj.name, err)
 				failed = append(failed, proj.name)
 			} else {
-				fmt.Printf("   ✅ %s passed\n", proj.name)
+				fmt.Printf(fmtProjectPassed, proj.name)
 				passed = append(passed, proj.name)
 			}
 		}
@@ -1274,7 +1478,7 @@ func TestProjects() error {
 	if len(failed) > 0 {
 		fmt.Println("   Failed projects:")
 		for _, name := range failed {
-			fmt.Printf("   • %s\n", name)
+			fmt.Printf(fmtBulletItem, name)
 		}
 		return fmt.Errorf("%d project(s) failed", len(failed))
 	}
@@ -1470,7 +1674,7 @@ func TestProjectsFailing() error {
 	if len(broken) > 0 {
 		fmt.Println("   Broken (tests passed when they should fail):")
 		for _, name := range broken {
-			fmt.Printf("   • %s\n", name)
+			fmt.Printf(fmtBulletItem, name)
 		}
 		return fmt.Errorf("%d language(s) failed to detect test failures", len(broken))
 	}

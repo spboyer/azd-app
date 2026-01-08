@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { HealthReportEvent, HealthChangeEvent, HealthCheckResult, HealthSummary } from '@/types'
+import { WEBSOCKET_CONSTANTS, HEALTH_CONSTANTS } from '@/lib/constants'
 
 /** Configuration options for the health stream hook */
 export interface UseHealthStreamOptions {
@@ -42,10 +43,10 @@ export interface UseHealthStreamReturn {
 }
 
 const API_BASE = ''
-const DEFAULT_INTERVAL = 5
-const DEFAULT_RECONNECT_DELAY = 3000
-const DEFAULT_MAX_RECONNECT_ATTEMPTS = 5
-const MAX_CHANGES_TO_KEEP = 50
+const DEFAULT_INTERVAL = HEALTH_CONSTANTS.DEFAULT_INTERVAL
+const DEFAULT_RECONNECT_DELAY = WEBSOCKET_CONSTANTS.DEFAULT_RECONNECT_DELAY
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = WEBSOCKET_CONSTANTS.MAX_RECONNECT_ATTEMPTS
+const MAX_CHANGES_TO_KEEP = HEALTH_CONSTANTS.MAX_CHANGES_TO_KEEP
 
 /**
  * Hook for consuming health check data from the SSE stream.
@@ -156,6 +157,7 @@ export function useHealthStream(options: UseHealthStreamOptions = {}): UseHealth
 
     eventSource.onerror = () => {
       setConnected(false)
+      cleanup() // Close the EventSource immediately to stop retry attempts
 
       // Clear any existing countdown
       if (countdownIntervalRef.current) {
@@ -163,22 +165,28 @@ export function useHealthStream(options: UseHealthStreamOptions = {}): UseHealth
         countdownIntervalRef.current = null
       }
 
-      // Attempt reconnection
+      // Attempt reconnection with backoff, but stop trying if clearly disconnected
       if (reconnectAttemptsRef.current < maxReconnectAttempts) {
         reconnectAttemptsRef.current++
+        // Exponential backoff: 3s, 6s, 12s, 24s, 48s
         const delay = reconnectDelay * Math.pow(2, reconnectAttemptsRef.current - 1)
         let remainingSeconds = Math.ceil(delay / 1000)
         
-        // Set initial countdown message
-        setError(`Connection lost. Reconnecting in ${remainingSeconds}s...`)
-        
-        // Update countdown every second
-        countdownIntervalRef.current = setInterval(() => {
-          remainingSeconds--
-          if (remainingSeconds > 0) {
-            setError(`Connection lost. Reconnecting in ${remainingSeconds}s...`)
-          }
-        }, 1000)
+        // Only show countdown for first few attempts
+        if (reconnectAttemptsRef.current <= 3) {
+          setError(`Connection lost. Reconnecting in ${remainingSeconds}s...`)
+          
+          // Update countdown every second
+          countdownIntervalRef.current = setInterval(() => {
+            remainingSeconds--
+            if (remainingSeconds > 0) {
+              setError(`Connection lost. Reconnecting in ${remainingSeconds}s...`)
+            }
+          }, 1000)
+        } else {
+          // After 3 attempts, just show a quiet message
+          setError('Backend connection lost')
+        }
 
         reconnectTimeoutRef.current = setTimeout(() => {
           // Clear countdown interval when reconnecting
@@ -189,7 +197,7 @@ export function useHealthStream(options: UseHealthStreamOptions = {}): UseHealth
           connect()
         }, delay)
       } else {
-        setError('Failed to connect to health stream. Please refresh the page.')
+        setError('Backend connection lost. Click to reconnect.')
       }
     }
   }, [

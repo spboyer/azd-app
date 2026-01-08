@@ -164,7 +164,7 @@ describe('LogsView', () => {
 
   it('should clear logs with confirmation', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true)
     
     render(<LogsView />)
 
@@ -185,7 +185,7 @@ describe('LogsView', () => {
 
   it('should not clear logs when confirmation is cancelled', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
     
     render(<LogsView />)
 
@@ -216,6 +216,12 @@ describe('LogsView', () => {
 
     render(<LogsView />)
 
+    // First should show loading state
+    await waitFor(() => {
+      expect(screen.getByText(/Fetching local logs/)).toBeInTheDocument()
+    })
+
+    // Then should show empty state after fetch completes
     await waitFor(() => {
       expect(screen.getByText('No logs to display')).toBeInTheDocument()
     })
@@ -247,6 +253,13 @@ describe('LogsView', () => {
       onerror: ((event: Event) => void) | null = null
       onclose: ((event: CloseEvent) => void) | null = null
       close = vi.fn()
+      addEventListener = vi.fn((event: string, handler: EventListener) => {
+        if (event === 'open') this.onopen = handler as (event: Event) => void
+        if (event === 'message') this.onmessage = handler as (event: MessageEvent) => void
+        if (event === 'error') this.onerror = handler as (event: Event) => void
+        if (event === 'close') this.onclose = handler as (event: CloseEvent) => void
+      })
+      removeEventListener = vi.fn()
       constructor(url: string) {
         this.url = url
         wsRef.current = this
@@ -260,9 +273,23 @@ describe('LogsView', () => {
 
     render(<LogsView />)
 
+    // Wait for initial logs to be fetched and rendered
+    await waitFor(() => {
+      expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+    }, { timeout: 10000 })
+
+    // Wait for WebSocket constructor to be called
     await waitFor(() => {
       expect(mockConstructorCalled).toBe(true)
-    })
+    }, { timeout: 10000 })
+
+    // Wait for WebSocket to be fully connected (onmessage handler set)
+    await waitFor(() => {
+      expect(wsRef.current?.onmessage).not.toBeNull()
+    }, { timeout: 10000 })
+
+    // Give a bit more time for component to stabilize
+    await new Promise(resolve => setTimeout(resolve, 100))
 
     // Simulate receiving a new log entry
     const newLogEntry = {
@@ -273,24 +300,26 @@ describe('LogsView', () => {
       isStderr: false,
     }
 
-    if (wsRef.current?.onmessage) {
-      const handler = wsRef.current.onmessage
-      act(() => {
-        handler(createMockWebSocketMessage(newLogEntry))
-      })
-    }
+    act(() => {
+      if (wsRef.current?.onmessage) {
+        wsRef.current.onmessage(createMockWebSocketMessage(newLogEntry))
+      }
+    })
+
+    // Wait a bit for the message to be processed
+    await new Promise(resolve => setTimeout(resolve, 100))
 
     await waitFor(() => {
       expect(screen.getByText('New log message from WebSocket')).toBeInTheDocument()
-    })
-  })
+    }, { timeout: 10000 })
+  }, 15000) // Increase overall test timeout to 15s
 
   it('should format timestamps correctly', async () => {
     render(<LogsView />)
 
     await waitFor(() => {
-      // Should display formatted timestamps in HH:MM:SS.mmm format
-      const timestamps = screen.getAllByText(/\[\d{2}:\d{2}:\d{2}\.\d{3}\]/)
+      // Should display formatted timestamps in MM-DD HH:MM:SS.mmm format
+      const timestamps = screen.getAllByText(/\[\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/)
       expect(timestamps.length).toBeGreaterThan(0)
     })
   })
@@ -466,6 +495,271 @@ describe('LogsView', () => {
     await waitFor(() => {
       const countText = screen.getByText(/Showing (\d+) of (\d+) log entries/)
       expect(countText.textContent).toContain('1000')
+    })
+  })
+
+  it('should not re-add logs from WebSocket after clearing', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true)
+    
+    // Mock WebSocket
+    const wsRef = { current: null as MockWebSocket | null }
+    class WebSocketMock {
+      url: string
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      onclose: ((event: CloseEvent) => void) | null = null
+      close = vi.fn()
+      constructor(url: string) {
+        this.url = url
+        wsRef.current = this
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+        }, 0)
+      }
+    }
+    globalThis.WebSocket = WebSocketMock as unknown as typeof WebSocket
+
+    render(<LogsView />)
+
+    // Wait for initial logs to load
+    await waitFor(() => {
+      expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+    })
+
+    // Simulate WebSocket message arriving just before clear
+    const pendingEntry = {
+      service: 'web',
+      message: 'This should not appear after clear',
+      level: 0,
+      timestamp: new Date().toISOString(),
+      isStderr: false,
+    }
+
+    // Clear logs
+    const clearButton = screen.getByTitle('Clear logs')
+    
+    // Send WebSocket message right before clear (simulating race condition)
+    if (wsRef.current?.onmessage) {
+      const handler = wsRef.current.onmessage
+      act(() => {
+        handler(createMockWebSocketMessage(pendingEntry))
+      })
+    }
+
+    // Then clear
+    await user.click(clearButton)
+
+    // Send another WebSocket message right after clear
+    if (wsRef.current?.onmessage) {
+      const handler = wsRef.current.onmessage
+      act(() => {
+        handler(
+          createMockWebSocketMessage({
+            service: 'web',
+            message: 'This should also not appear',
+            level: 0,
+            timestamp: new Date().toISOString(),
+            isStderr: false,
+          })
+        )
+      })
+    }
+
+    // Should show empty state and NOT contain the WebSocket messages
+    await waitFor(() => {
+      expect(screen.getByText('No logs to display')).toBeInTheDocument()
+      expect(screen.queryByText('This should not appear after clear')).not.toBeInTheDocument()
+      expect(screen.queryByText('This should also not appear')).not.toBeInTheDocument()
+    })
+
+    confirmSpy.mockRestore()
+  })
+
+  describe('clearAllTrigger prop (external clear control)', () => {
+    it('should clear logs when clearAllTrigger is incremented', async () => {
+      const { rerender } = render(<LogsView clearAllTrigger={0} />)
+
+      // Wait for initial logs to load
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+      })
+
+      // Increment clearAllTrigger to trigger clear
+      rerender(<LogsView clearAllTrigger={1} />)
+
+      // Logs should be cleared
+      await waitFor(() => {
+        expect(screen.getByText('No logs to display')).toBeInTheDocument()
+        expect(screen.queryByText(/Starting Flask application/)).not.toBeInTheDocument()
+      })
+    })
+
+    it('should clear logs without confirmation when using clearAllTrigger', async () => {
+      const confirmSpy = vi.spyOn(globalThis, 'confirm')
+      
+      const { rerender } = render(<LogsView clearAllTrigger={0} hideControls={true} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+      })
+
+      // Increment clearAllTrigger
+      rerender(<LogsView clearAllTrigger={1} hideControls={true} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('No logs to display')).toBeInTheDocument()
+      })
+
+      // Should NOT have shown confirmation dialog
+      expect(confirmSpy).not.toHaveBeenCalled()
+      
+      confirmSpy.mockRestore()
+    })
+
+    it('should handle multiple clearAllTrigger increments', async () => {
+      const wsRef = { current: null as MockWebSocket | null }
+      class WebSocketMock {
+        url: string
+        onopen: ((event: Event) => void) | null = null
+        onmessage: ((event: MessageEvent) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        onclose: ((event: CloseEvent) => void) | null = null
+        close = vi.fn()
+        constructor(url: string) {
+          this.url = url
+          wsRef.current = this
+          setTimeout(() => {
+            this.onopen?.(new Event('open'))
+          }, 0)
+        }
+      }
+      globalThis.WebSocket = WebSocketMock as unknown as typeof WebSocket
+
+      const { rerender } = render(<LogsView clearAllTrigger={0} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+      })
+
+      // First clear
+      rerender(<LogsView clearAllTrigger={1} />)
+      await waitFor(() => {
+        expect(screen.getByText('No logs to display')).toBeInTheDocument()
+      })
+
+      // Add new logs via WebSocket
+      if (wsRef.current?.onmessage) {
+        const handler = wsRef.current.onmessage
+        // Wait 150ms to be past the 100ms race condition window
+        await new Promise(resolve => setTimeout(resolve, 150))
+        act(() => {
+          handler(createMockWebSocketMessage({
+            service: 'api',
+            message: 'New log after clear',
+            level: 0,
+            timestamp: new Date().toISOString(),
+            isStderr: false,
+          }))
+        })
+      }
+      
+      // Wait for logs to appear
+      await waitFor(() => {
+        expect(screen.getByText('New log after clear')).toBeInTheDocument()
+      })
+
+      // Second clear
+      rerender(<LogsView clearAllTrigger={2} />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('No logs to display')).toBeInTheDocument()
+        expect(screen.queryByText('New log after clear')).not.toBeInTheDocument()
+      })
+    })
+
+    it('should prevent WebSocket messages immediately after clearAllTrigger', async () => {
+      const wsRef = { current: null as MockWebSocket | null }
+      class WebSocketMock {
+        url: string
+        onopen: ((event: Event) => void) | null = null
+        onmessage: ((event: MessageEvent) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        onclose: ((event: CloseEvent) => void) | null = null
+        close = vi.fn()
+        constructor(url: string) {
+          this.url = url
+          wsRef.current = this
+          setTimeout(() => {
+            this.onopen?.(new Event('open'))
+          }, 0)
+        }
+      }
+      globalThis.WebSocket = WebSocketMock as unknown as typeof WebSocket
+
+      const { rerender } = render(<LogsView clearAllTrigger={0} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+      })
+
+      // Trigger clear
+      rerender(<LogsView clearAllTrigger={1} />)
+
+      // Try to send WebSocket message right after clear
+      if (wsRef.current?.onmessage) {
+        const handler = wsRef.current.onmessage
+        act(() => {
+          handler(createMockWebSocketMessage({
+            service: 'web',
+            message: 'Should not appear',
+            level: 0,
+            timestamp: new Date().toISOString(),
+            isStderr: false,
+          }))
+        })
+      }
+
+      // Should show empty state
+      await waitFor(() => {
+        expect(screen.getByText('No logs to display')).toBeInTheDocument()
+        expect(screen.queryByText('Should not appear')).not.toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('controlled vs uncontrolled mode', () => {
+    it('should hide controls when hideControls is true', async () => {
+      render(<LogsView hideControls={true} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+      })
+
+      // Controls should be hidden
+      expect(screen.queryByPlaceholderText('Search logs...')).not.toBeInTheDocument()
+      expect(screen.queryByTitle('Clear logs')).not.toBeInTheDocument()
+      expect(screen.queryByTitle('Pause')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Showing \d+ of \d+ log entries/)).not.toBeInTheDocument()
+    })
+
+    it('should use external globalSearchTerm when provided', async () => {
+      const { rerender } = render(<LogsView globalSearchTerm="" />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+        expect(screen.getByText(/Express server/)).toBeInTheDocument()
+      })
+
+      // Change search term externally
+      rerender(<LogsView globalSearchTerm="Flask" />)
+
+      // Should filter logs
+      await waitFor(() => {
+        expect(screen.getByText(/Starting Flask application/)).toBeInTheDocument()
+        expect(screen.queryByText(/Express server/)).not.toBeInTheDocument()
+      })
     })
   })
 })

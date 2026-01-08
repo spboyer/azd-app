@@ -5,6 +5,47 @@ export interface ClassificationOverride {
   createdAt: string
 }
 
+// ============================================================================
+// Azure Error Types
+// ============================================================================
+
+/**
+ * ErrorInfo from API - structured error with actionable guidance
+ * Returned by /api/azure/logs when status=error
+ */
+export interface ErrorInfo {
+  message: string   // Human-readable error message
+  code: string      // Error code: "AUTH_REQUIRED", "NOT_DEPLOYED", "NO_WORKSPACE", etc.
+  action: string    // What the user should do
+  command?: string  // CLI command to run (optional)
+  docsUrl?: string  // Documentation URL
+}
+
+/**
+ * Specific Azure error types for actionable error handling
+ * Each type has specific UI treatment and guidance
+ */
+export type AzureErrorType = 
+  | 'auth'        // Authentication required (401, missing credentials)
+  | 'permission'  // Permission denied (403, RBAC issues)
+  | 'not-found'   // Resource not found (404, not deployed)
+  | 'rate-limit'  // Rate limited (429, throttling)
+  | 'network'     // Network error (timeout, connection refused)
+  | 'workspace'   // Log Analytics not configured
+  | 'query'       // Invalid KQL query syntax
+  | 'generic'     // Unknown/fallback error
+
+/**
+ * Parsed Azure error with type and metadata
+ */
+export interface ParsedAzureError {
+  type: AzureErrorType
+  message: string
+  statusCode?: number
+  retryAfter?: number  // Seconds to wait before retry (for rate limits)
+  details?: string     // Additional error details
+}
+
 /** Type of health check performed */
 export type HealthCheckType = 'http' | 'tcp' | 'process'
 
@@ -106,6 +147,7 @@ export interface AzureServiceInfo {
 
 export interface Service {
   name: string
+  host?: string  // Host type from azure.yaml: "local", "containerapp", "appservice", "function", etc.
   language?: string
   framework?: string
   project?: string
@@ -151,6 +193,9 @@ export interface HealthCheckResult {
   responseTime: number  // nanoseconds from Go, convert to ms
   statusCode?: number
   error?: string
+  errorDetails?: string  // Extended error information
+  consecutiveFailures?: number  // Failure count
+  lastSuccessTime?: string  // ISO timestamp of last success
   timestamp: string
   details?: Record<string, unknown>
   port?: number
@@ -195,3 +240,23 @@ export interface HeartbeatEvent extends HealthEvent {
 
 /** Union type for all health events */
 export type AnyHealthEvent = HealthReportEvent | HealthChangeEvent | HeartbeatEvent
+
+// ============================================================================
+// Health Diagnostic Types (for tooltip/diagnostic UI)
+// ============================================================================
+
+/** Suggested action for resolving health issues */
+export interface HealthAction {
+  label: string
+  icon?: string
+  command?: string
+  docsUrl?: string
+}
+
+/** Complete health diagnostic information */
+export interface HealthDiagnostic {
+  service: Service
+  healthStatus: HealthCheckResult
+  suggestedActions: HealthAction[]
+  formattedReport: string  // Pre-formatted markdown for copy
+}

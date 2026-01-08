@@ -166,7 +166,26 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = '${{ needs.check-permission.outputs.pr_number }}' || context.payload.pull_request.number;
+            let prNumber = '${{ needs.check-permission.outputs.pr_number }}';
+            
+            // If no PR number from permission check, try to find it from the current branch
+            if (!prNumber) {
+              const ref = context.ref.replace('refs/heads/', '');
+              const { data: prs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                head: `${context.repo.owner}:${ref}`
+              });
+              
+              if (prs.length > 0) {
+                prNumber = prs[0].number;
+              } else {
+                core.setFailed('No PR found for this branch. Please provide pr_number input.');
+                return;
+              }
+            }
+            
             const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -273,8 +292,14 @@ jobs:
           TAG="azd-ext-jongio-azd-app_${VERSION}"
           PR_NUM="${{ steps.pr.outputs.number }}"
           
-          # Delete existing release if it exists (idempotent for re-runs)
-          gh release delete "$TAG" --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          # Delete existing release and tag to ensure we're not reusing cached artifacts
+          gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          
+          # Extra safety: force delete the tag if it still exists
+          git push --delete origin "$TAG" 2>/dev/null || true
+          
+          # Wait a moment for GitHub to process the deletion
+          sleep 2
           
           # Create pre-release with all binaries (same pattern as release.yml but with --prerelease)
           gh release create "$TAG" \
