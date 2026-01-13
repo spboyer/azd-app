@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { DualStatusBadge, type EffectiveStatus } from './StatusIndicator'
 import { ServiceActions } from '@/components/ServiceActions'
 import { useServiceOperations } from '@/hooks/useServiceOperations'
+import { useServiceUrls } from '@/hooks/useServiceUrls'
 import type { Service, HealthReportEvent, HealthCheckResult } from '@/types'
 import { 
   formatRelativeTime, 
@@ -70,12 +71,18 @@ function ServiceTableRow({
   // Get effective operation state using centralized logic (handles bulk operations)
   const { getEffectiveOperationState } = useServiceOperations()
   const operationState = getEffectiveOperationState(service.name)
+  
+  // Get all URL data using custom hook (eliminates prop drilling)
+  const {
+    effectiveLocal,
+    effectiveAzure,
+    localBadge,
+    azureBadge,
+  } = useServiceUrls(service)
     
   // Use unified display status from service-utils (SINGLE SOURCE OF TRUTH)
   const effectiveStatus = getServiceDisplayStatus(service, healthStatus, operationState) as EffectiveStatus
   
-  const localUrl = service.local?.url && !service.local.url.match(/:0\/?$/) ? service.local.url : null
-  const azureUrl = service.azure?.url
   const startTime = service.local?.startTime ?? service.startTime
   
   // Process service detection
@@ -249,15 +256,21 @@ function ServiceTableRow({
 
       {/* Local URL */}
       <td className="py-3 px-4">
-        {localUrl ? (
+        {effectiveLocal.url ? (
           <a
-            href={localUrl}
+            href={effectiveLocal.url}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-700 rounded text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition-colors max-w-[180px]"
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono rounded transition-colors max-w-[180px]",
+              localBadge?.color || "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+            )}
+            title={effectiveLocal.source === 'customUrl' && effectiveLocal.defaultUrl 
+              ? `Custom URL (default: ${effectiveLocal.defaultUrl})` 
+              : undefined}
           >
-            <span className="truncate">{localUrl}</span>
+            <span className="truncate">{effectiveLocal.url}</span>
             <ExternalLink className="w-3 h-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
           </a>
         ) : null}
@@ -265,15 +278,23 @@ function ServiceTableRow({
 
       {/* Azure URL */}
       <td className="py-3 px-4">
-        {azureUrl ? (
+        {effectiveAzure.url ? (
           <a
-            href={azureUrl}
+            href={effectiveAzure.url}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/30 rounded text-cyan-700 dark:text-cyan-300 hover:border-cyan-400 dark:hover:border-cyan-500 transition-colors max-w-[180px]"
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono rounded transition-colors max-w-[180px]",
+              azureBadge?.color || "bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/30 text-cyan-700 dark:text-cyan-300"
+            )}
+            title={effectiveAzure.source === 'customDomain-sdk' 
+              ? `Azure custom domain (fallback: ${effectiveAzure.defaultUrl || 'none'})`
+              : effectiveAzure.source === 'customUrl' && effectiveAzure.defaultUrl
+              ? `Custom URL (default: ${effectiveAzure.defaultUrl})`
+              : undefined}
           >
-            <span className="truncate">{azureUrl}</span>
+            <span className="truncate">{effectiveAzure.url}</span>
             <ExternalLink className="w-3 h-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
           </a>
         ) : (

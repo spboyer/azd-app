@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useClipboard } from '@/hooks/useClipboard'
+import { useServiceUrls } from '@/hooks/useServiceUrls'
 import { StatusBadge, type EffectiveStatus } from './StatusIndicator'
 import { ServiceActions } from '@/components/ServiceActions'
 import { useServiceOperations, type OperationState } from '@/hooks/useServiceOperations'
@@ -214,7 +215,7 @@ interface OverviewTabProps {
 
 function OverviewTab({ service, healthStatus, operationState }: OverviewTabProps) {
   const effectiveStatus = getEffectiveStatusForUI(service, healthStatus, operationState)
-  const localUrl = service.local?.url && !service.local.url.match(/:0\/?$/) ? service.local.url : null
+  const { effectiveLocal, effectiveAzure } = useServiceUrls(service)
   const isDeployed = hasAzureDeployment(service)
   const azurePortalUrl = buildAzurePortalUrl(service)
   
@@ -262,17 +263,41 @@ function OverviewTab({ service, healthStatus, operationState }: OverviewTabProps
             label="Status" 
             value={<StatusBadge status={effectiveStatus} />} 
           />
-          {localUrl && (
+          {effectiveLocal.url && (
             <InfoRow 
-              label="URL" 
+              label={effectiveLocal.source === 'customUrl' ? "URL (Custom)" : "URL"}
               value={
                 <a 
-                  href={localUrl}
+                  href={effectiveLocal.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
+                  className={cn(
+                    "hover:underline flex items-center gap-1",
+                    effectiveLocal.source === 'customUrl'
+                      ? "text-purple-600 dark:text-purple-400"
+                      : "text-cyan-600 dark:text-cyan-400"
+                  )}
+                  title={effectiveLocal.source === 'customUrl' && effectiveLocal.defaultUrl 
+                    ? `Custom URL configured (default: ${effectiveLocal.defaultUrl})` 
+                    : undefined}
                 >
-                  {localUrl}
+                  {effectiveLocal.url}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              } 
+            />
+          )}
+          {effectiveLocal.source === 'customUrl' && effectiveLocal.defaultUrl && (
+            <InfoRow 
+              label="Default URL" 
+              value={
+                <a
+                  href={effectiveLocal.defaultUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-slate-500 dark:text-slate-400 font-mono hover:text-cyan-600 dark:hover:text-cyan-400 hover:underline flex items-center gap-1"
+                >
+                  {effectiveLocal.defaultUrl}
                   <ExternalLink className="w-3 h-3" />
                 </a>
               } 
@@ -295,17 +320,29 @@ function OverviewTab({ service, healthStatus, operationState }: OverviewTabProps
             {service.azure?.resourceName && (
               <InfoRow label="Resource" value={service.azure.resourceName} />
             )}
-            {service.azure?.url && (
+            {effectiveAzure.url && (
               <InfoRow 
-                label="Endpoint" 
+                label={
+                  effectiveAzure.source === 'customDomain-user' ? 'Custom Domain' :
+                  effectiveAzure.source === 'customDomain-sdk' ? 'Custom Domain (Azure)' :
+                  effectiveAzure.source === 'customUrl' ? 'Custom URL' :
+                  'Endpoint'
+                }
                 value={
                   <a 
-                    href={service.azure.url}
+                    href={effectiveAzure.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 break-all"
+                    className={cn(
+                      "hover:underline flex items-center gap-1 break-all",
+                      effectiveAzure.source === 'customDomain-user' || effectiveAzure.source === 'customUrl'
+                        ? "text-purple-600 dark:text-purple-400"
+                        : effectiveAzure.source === 'customDomain-sdk'
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-cyan-600 dark:text-cyan-400"
+                    )}
                   >
-                    {service.azure.url}
+                    {effectiveAzure.url}
                     <ExternalLink className="w-3 h-3 shrink-0" />
                   </a>
                 } 
@@ -343,7 +380,6 @@ interface LocalTabProps {
 
 function LocalTab({ service, healthStatus, copiedField, onCopy, operationState }: LocalTabProps) {
   const effectiveStatus = getEffectiveStatusForUI(service, healthStatus, operationState)
-  const localUrl = service.local?.url && !service.local.url.match(/:0\/?$/) ? service.local.url : null
 
   return (
     <div>
@@ -388,17 +424,56 @@ function LocalTab({ service, healthStatus, copiedField, onCopy, operationState }
           {service.local?.port && service.local.port > 0 && (
             <InfoRow label="Port" value={service.local.port} />
           )}
-          {localUrl && (
-            <InfoRow 
-              label="URL" 
-              value={localUrl}
-              copyable
-              onCopy={() => onCopy(localUrl, 'url')}
-              copied={copiedField === 'url'}
-            />
-          )}
         </div>
       </SectionCard>
+
+      {/* URLs Section - Show all available URLs */}
+      {(service.local?.url || service.local?.customUrl) && (
+        <SectionCard title="URLs">
+          <div className="space-y-0">
+            {/* Custom URL (highest precedence) */}
+            {service.local?.customUrl && (
+              <InfoRow 
+                label="Custom URL"
+                value={
+                  <a
+                    href={service.local.customUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.local.customUrl}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                }
+                copyable
+                onCopy={() => onCopy(service.local?.customUrl ?? '', 'customUrl')}
+                copied={copiedField === 'customUrl'}
+              />
+            )}
+            {/* Default/Auto-discovered URL */}
+            {service.local?.url && (
+              <InfoRow 
+                label={service.local.customUrl ? "Default URL" : "URL"}
+                value={
+                  <a
+                    href={service.local.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.local.url}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                }
+                copyable
+                onCopy={() => onCopy(service.local?.url ?? '', 'url')}
+                copied={copiedField === 'url'}
+              />
+            )}
+          </div>
+        </SectionCard>
+      )}
 
       {/* Timing */}
       <SectionCard title="Timing">
@@ -441,10 +516,12 @@ interface AzureTabProps {
 }
 
 function AzureTab({ service }: AzureTabProps) {
-  const isDeployed = hasAzureDeployment(service)
+  const hasConfiguredUrls = Boolean(service.azure?.customUrl || service.azure?.customDomain || service.azure?.url)
+  const hasResourceInfo = Boolean(service.azure?.resourceName || service.azure?.resourceType || service.azure?.imageName)
+  const hasAnyAzureData = hasConfiguredUrls || hasResourceInfo || hasAzureDeployment(service)
   const azurePortalUrl = buildAzurePortalUrl(service)
 
-  if (!isDeployed) {
+  if (!hasAnyAzureData) {
     return (
       <SectionCard title="Not Deployed">
         <div className="text-center py-6">
@@ -463,35 +540,100 @@ function AzureTab({ service }: AzureTabProps) {
   return (
     <div>
       {/* Resource */}
-      <SectionCard title="Resource">
-        <div className="space-y-0">
-          {service.azure?.resourceName && (
-            <InfoRow label="Resource Name" value={service.azure.resourceName} />
-          )}
-          {service.azure?.resourceType && (
-            <InfoRow label="Resource Type" value={service.azure.resourceType} />
-          )}
-          {service.azure?.imageName && (
-            <InfoRow label="Image" value={service.azure.imageName} />
-          )}
-          {service.azure?.url && (
-            <InfoRow 
-              label="Endpoint" 
-              value={
-                <a 
-                  href={service.azure.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 break-all"
-                >
-                  {service.azure.url}
-                  <ExternalLink className="w-3 h-3 shrink-0" />
-                </a>
-              } 
-            />
-          )}
-        </div>
-      </SectionCard>
+      {hasResourceInfo && (
+        <SectionCard title="Resource">
+          <div className="space-y-0">
+            {service.azure?.resourceName && (
+              <InfoRow label="Resource Name" value={service.azure.resourceName} />
+            )}
+            {service.azure?.resourceType && (
+              <InfoRow label="Resource Type" value={service.azure.resourceType} />
+            )}
+            {service.azure?.imageName && (
+              <InfoRow label="Image" value={service.azure.imageName} />
+            )}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* URLs Section - Show all configured URLs */}
+      {(service.azure?.url || service.azure?.customUrl || service.azure?.customDomain) && (
+        <SectionCard title="URLs">
+          <div className="space-y-0">
+            {/* Custom Domain (highest precedence for user-configured) */}
+            {service.azure?.customDomain && service.azure.customDomainSource === 'user' && (
+              <InfoRow 
+                label="Custom Domain"
+                value={
+                  <a 
+                    href={service.azure.customDomain}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.azure.customDomain}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                } 
+              />
+            )}
+
+            {/* Custom Domain from Azure SDK */}
+            {service.azure?.customDomain && service.azure.customDomainSource === 'azure-sdk' && (
+              <InfoRow 
+                label="Custom Domain (Azure)"
+                value={
+                  <a 
+                    href={service.azure.customDomain}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.azure.customDomain}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                } 
+              />
+            )}
+            
+            {/* Custom URL */}
+            {service.azure?.customUrl && (
+              <InfoRow 
+                label="Custom URL" 
+                value={
+                  <a 
+                    href={service.azure.customUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.azure.customUrl}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                } 
+              />
+            )}
+            
+            {/* Deployment URL (auto-discovered) */}
+            {service.azure?.url && (
+              <InfoRow 
+                label={service.azure.customUrl || service.azure.customDomain ? "Deployment URL" : "URL"}
+                value={
+                  <a 
+                    href={service.azure.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 break-all"
+                  >
+                    {service.azure.url}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                } 
+              />
+            )}
+          </div>
+        </SectionCard>
+      )}
 
       {/* Azure Metadata */}
       {(service.azure?.subscriptionId || service.azure?.resourceGroup || service.azure?.location) && (

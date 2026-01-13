@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jongio/azd-app/cli/src/internal/dashboard"
-	"github.com/jongio/azd-core/cliout"
 	"github.com/jongio/azd-app/cli/src/internal/serviceinfo"
+	"github.com/jongio/azd-core/cliout"
 
 	"github.com/spf13/cobra"
 )
@@ -148,16 +148,34 @@ func printInfoDefault(projectDir string, services []*serviceinfo.ServiceInfo, az
 			} else if svc.Local.Port > 0 {
 				cliout.Label("  Local URL", fmt.Sprintf("http://localhost:%d (not running)", svc.Local.Port))
 			}
+
+			// Show custom local URL if configured
+			if svc.Local.CustomURL != "" {
+				cliout.Label("  Custom Local URL", svc.Local.CustomURL)
+			}
 		}
 
 		// Azure URL and info
 		if svc.Azure != nil {
+			// Show auto-discovered Azure URL
 			if svc.Azure.URL != "" {
 				cliout.Label("  Azure URL", svc.Azure.URL)
 			}
-			if svc.Azure.ResourceName != "" {
-				cliout.Label("  Azure Resource", svc.Azure.ResourceName)
+
+			// Show custom Azure URL if configured
+			if svc.Azure.CustomURL != "" {
+				cliout.Label("  Custom Azure URL", svc.Azure.CustomURL)
 			}
+
+			// Show custom domain if configured
+			if svc.Azure.CustomDomain != "" {
+				label := "  Custom Domain"
+				if svc.Azure.CustomDomainSource != "" {
+					label = fmt.Sprintf("  Custom Domain (%s)", svc.Azure.CustomDomainSource)
+				}
+				cliout.Label(label, svc.Azure.CustomDomain)
+			}
+
 			if svc.Azure.ImageName != "" {
 				cliout.Label("  Docker Image", svc.Azure.ImageName)
 			}

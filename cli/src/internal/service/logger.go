@@ -3,6 +3,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +33,18 @@ var colorCodes = []string{
 
 const (
 	colorReset = "\033[0m"
-	colorBold  = "\033[1m"
 	colorGray  = "\033[90m"
 )
+
+// ServiceURLSummary captures the URLs to display for a service.
+type ServiceURLSummary struct {
+	Name              string
+	LocalURL          string
+	LocalCustomURL    string
+	AzureURL          string
+	AzureCustomURL    string
+	AzureCustomDomain string
+}
 
 // NewServiceLogger creates a new logger for service orchestration.
 func NewServiceLogger(verbose bool) *ServiceLogger {
@@ -167,12 +177,35 @@ func (l *ServiceLogger) LogStartup(serviceCount int) {
 }
 
 // LogSummary logs the service URLs after startup.
-func (l *ServiceLogger) LogSummary(urls map[string]string) {
+// Displays each service once with all known URLs/domains.
+func (l *ServiceLogger) LogSummary(summaries []ServiceURLSummary) {
+	if len(summaries) == 0 {
+		return
+	}
+
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].Name < summaries[j].Name
+	})
+
 	fmt.Println()
-	if len(urls) > 0 {
-		for name, url := range urls {
-			fmt.Printf("  \033[32m✓\033[0m %-18s  %s\n", name, url)
+
+	for _, summary := range summaries {
+		fmt.Printf("  \033[32m✓\033[0m %s\n", summary.Name)
+
+		printURL := func(label, value string) {
+			if strings.TrimSpace(value) == "" {
+				return
+			}
+			fmt.Printf("    %s %s\n", label, value)
 		}
+
+		printURL("local:", summary.LocalURL)
+		printURL("custom:", summary.LocalCustomURL)
+		printURL("azure:", summary.AzureURL)
+		printURL("azure (custom):", summary.AzureCustomURL)
+		printURL("domain:", summary.AzureCustomDomain)
+
+		fmt.Println()
 	}
 }
 

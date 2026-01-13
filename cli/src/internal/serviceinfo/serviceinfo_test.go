@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jongio/azd-app/cli/src/internal/registry"
 	"github.com/jongio/azd-app/cli/src/internal/service"
@@ -343,6 +344,135 @@ func TestMergeServiceInfo(t *testing.T) {
 	if apiService.EnvironmentVars["AZURE_SUBSCRIPTION_ID"] != "test-sub-id" {
 		t.Errorf("api env var AZURE_SUBSCRIPTION_ID = %q, want %q",
 			apiService.EnvironmentVars["AZURE_SUBSCRIPTION_ID"], "test-sub-id")
+	}
+}
+
+func TestMergeServiceInfo_WithURL(t *testing.T) {
+	azureYaml := &service.AzureYaml{
+		Services: map[string]service.Service{
+			"web": {
+				Language: "node",
+				Host:     "containerapp",
+				Project:  "./web",
+				URL:      "https://myapp.example.com", // Deprecated root-level URL field
+			},
+			"api": {
+				Language: "python",
+				Host:     "appservice",
+				Project:  "./api",
+				URL:      "https://api.myapp.example.com", // Deprecated root-level URL field
+			},
+		},
+	}
+
+	azureServices := map[string]AzureServiceInfo{
+		"web": {
+			URL:          "https://web-abc123.azurewebsites.net", // Auto-discovered URL
+			ResourceName: "web-abc123",
+		},
+		"api": {
+			URL:          "https://api-abc123.azurewebsites.net", // Auto-discovered URL
+			ResourceName: "api-abc123",
+		},
+	}
+
+	envVars := map[string]string{}
+
+	result := mergeServiceInfo(azureYaml, nil, azureServices, envVars)
+
+	if len(result) != 2 {
+		t.Fatalf("Expected 2 services, got %d", len(result))
+	}
+
+	// Find the web service and verify CustomURL is set from deprecated URL field
+	var webService *ServiceInfo
+	for _, svc := range result {
+		if svc.Name == "web" {
+			webService = svc
+			break
+		}
+	}
+
+	if webService == nil {
+		t.Fatal("web service not found")
+	}
+
+	if webService.Azure == nil {
+		t.Fatal("web Azure info should not be nil")
+	}
+
+	// Verify deprecated URL field migrated to CustomURL
+	if webService.Azure.CustomURL != "https://myapp.example.com" {
+		t.Errorf("web Azure.CustomURL = %q, want %q", webService.Azure.CustomURL, "https://myapp.example.com")
+	}
+
+	// Verify auto-discovered URL is preserved
+	if webService.Azure.URL != "https://web-abc123.azurewebsites.net" {
+		t.Errorf("web Azure.URL = %q, want %q", webService.Azure.URL, "https://web-abc123.azurewebsites.net")
+	}
+
+	// Find the api service and verify url is set
+	var apiService *ServiceInfo
+	for _, svc := range result {
+		if svc.Name == "api" {
+			apiService = svc
+			break
+		}
+	}
+
+	if apiService == nil {
+		t.Fatal("api service not found")
+	}
+
+	if apiService.Azure == nil {
+		t.Fatal("api Azure info should not be nil")
+	}
+
+	if apiService.Azure.CustomURL != "https://api.myapp.example.com" {
+		t.Errorf("api Azure.CustomURL = %q, want %q", apiService.Azure.CustomURL, "https://api.myapp.example.com")
+	}
+
+	if apiService.Azure.URL != "https://api-abc123.azurewebsites.net" {
+		t.Errorf("api Azure.URL = %q, want %q", apiService.Azure.URL, "https://api-abc123.azurewebsites.net")
+	}
+}
+
+func TestMergeServiceInfo_PreservesLocalCustomURLWithRunningService(t *testing.T) {
+	azureYaml := &service.AzureYaml{
+		Services: map[string]service.Service{
+			"web": {
+				Language: "node",
+				Host:     "containerapp",
+				Project:  "./web",
+				Local: &service.LocalServiceConfig{
+					CustomURL: "https://local.override.example.com",
+				},
+			},
+		},
+	}
+
+	running := []*registry.ServiceRegistryEntry{
+		{
+			Name:        "web",
+			Status:      "running",
+			Port:        3000,
+			StartTime:   time.Now(),
+			LastChecked: time.Now(),
+		},
+	}
+
+	result := mergeServiceInfo(azureYaml, running, nil, nil)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(result))
+	}
+
+	web := result[0]
+	if web.Local == nil {
+		t.Fatalf("expected Local info to be present")
+	}
+
+	if web.Local.CustomURL != "https://local.override.example.com" {
+		t.Fatalf("expected custom local URL to be preserved, got %q", web.Local.CustomURL)
 	}
 }
 

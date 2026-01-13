@@ -53,6 +53,12 @@ func ParseAzureYaml(workingDir string) (*AzureYaml, error) {
 				azureYaml.Services[name] = svc
 			}
 		}
+
+		// Validate service configuration
+		if err := ValidateServiceConfig(name, &svc); err != nil {
+			return nil, err
+		}
+		azureYaml.Services[name] = svc
 	}
 
 	return &azureYaml, nil

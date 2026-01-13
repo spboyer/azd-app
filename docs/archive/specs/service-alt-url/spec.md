@@ -30,25 +30,23 @@ services:
     project: ./src/web
     host: appservice
     language: ts
-    config:
-      altUrl: https://myapp.example.com
+    url: https://myapp.example.com
   
   api:
     project: ./src/api
     host: containerapp
     language: python
-    config:
-      altUrl: https://api.myapp.example.com
+    url: https://api.myapp.example.com
 ```
 
 ### Dashboard UI Behavior
-- When a service has an `altUrl` configured, clicking "Open" in the dashboard must navigate to the alternate URL
-- The service status card should indicate when an alternate URL is in use (e.g., display the alternate URL instead of or alongside the default URL)
+- When a service has a `url` configured, clicking "Open" in the dashboard must navigate to the custom URL
+- The service status card should indicate when a custom URL is in use (e.g., display the custom URL instead of or alongside the default URL)
 - Hover tooltips or info icons should clarify which URL is the actual deployment and which is the alternate access point
 
 ### Console Output
-- When printing service URLs (e.g., during `azd up`, `azd deploy`, or `azd app endpoints`), display the alternate URL if configured
-- Console output should clearly distinguish between the deployment URL and alternate URL
+- When printing service URLs (e.g., during `azd up`, `azd deploy`, or `azd app endpoints`), display the custom URL if configured
+- Console output should clearly distinguish between the deployment URL and custom URL
 - Format example:
   ```
   Service: web
@@ -57,32 +55,32 @@ services:
   ```
 
 ### CORS Handling
-- For services that use CORS (typically APIs), the alternate URL origin must be included in CORS allowed origins
-- CORS configuration should be updated automatically during deployment when `altUrl` is present
+- For services that use CORS (typically APIs), the custom URL origin must be included in CORS allowed origins
+- CORS configuration should be updated automatically during deployment when `url` is present
 - This applies to both Azure App Service and Container Apps CORS settings
-- Local development mode should also respect alternate URL for CORS configuration
+- Local development mode should also respect custom URL for CORS configuration
 
 ### API and Data Model
-- Extend the service configuration model to include optional `altUrl` field
-- Dashboard API must return `altUrl` when available
-- Browser launch logic must check for `altUrl` and prefer it over default URL
-- Console formatting utilities must incorporate `altUrl` display logic
+- Extend the service configuration model to include optional `url` field
+- Dashboard API must return `url` when available
+- Browser launch logic must check for `url` and prefer it over default URL
+- Console formatting utilities must incorporate `url` display logic
 
 ### Validation
-- Alternate URLs should be valid HTTP/HTTPS URLs
-- Provide warning if alternate URL is configured but appears unreachable (non-blocking)
+- Custom URLs should be valid HTTP/HTTPS URLs
+- Provide warning if custom URL is configured but appears unreachable (non-blocking)
 - No validation required for URL reachability during configuration parse
 
 ## UX and Validation Notes
-- Configuration parsing must fail gracefully if `altUrl` is malformed, with clear error messages
-- Dashboard should handle scenarios where alternate URL is unreachable without breaking the UI
-- Console output should maintain consistent formatting whether alternate URL is configured or not
-- If both deployment URL and alternate URL are shown, clearly label which is which to avoid user confusion
+- Configuration parsing must fail gracefully if `url` is malformed, with clear error messages
+- Dashboard should handle scenarios where custom URL is unreachable without breaking the UI
+- Console output should maintain consistent formatting whether custom URL is configured or not
+- If both deployment URL and custom URL are shown, clearly label which is which to avoid user confusion
 
 ## Implementation Considerations
 
 ### Files Likely to Change
-- `cli/src/internal/appconfig/config.go` - Parse `altUrl` from `azure.yaml`
+- `cli/src/internal/appconfig/config.go` - Parse `url` from `azure.yaml`
 - `cli/src/internal/repository/app_config.go` - Service configuration model
 - `cli/dashboard/src/types/service.ts` - TypeScript service interface
 - `cli/dashboard/src/components/ServiceCard.tsx` - Display and launch logic
@@ -95,7 +93,7 @@ services:
 - Local development: Update development server CORS middleware
 
 ### Backward Compatibility
-- Services without `altUrl` must continue to work exactly as before
+- Services without `url` must continue to work exactly as before
 - Existing `azure.yaml` files without this configuration remain valid
 - Default behavior unchanged when feature is not used
 
@@ -107,9 +105,9 @@ services:
 - Should the dashboard show both URLs with a toggle, or only the alternate URL when configured?
 
 ## Success Criteria
-- Users can configure alternate URLs in `azure.yaml` without errors
-- Clicking "Open" in dashboard navigates to alternate URL when configured
-- Console output displays alternate URLs clearly
-- CORS configuration automatically includes alternate URL origins
-- No regression in behavior for services without alternate URL configuration
+- Users can configure custom URLs in `azure.yaml` without errors
+- Clicking "Open" in dashboard navigates to custom URL when configured
+- Console output displays custom URLs clearly
+- CORS configuration automatically includes custom URL origins
+- No regression in behavior for services without custom URL configuration
 - Documentation clearly explains configuration format and use cases

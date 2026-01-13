@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { formatLogTimestamp, getLogPaneVisualStatus, normalizeHealthStatus } from '@/lib/service-utils'
+import { formatLogTimestamp, getLogPaneVisualStatus, getEffectiveAzureUrl, getEffectiveLocalUrl, normalizeHealthStatus } from '@/lib/service-utils'
 import { cn } from '@/lib/utils'
 import { useCodespaceEnv } from '@/hooks/useCodespaceEnv'
 import { getEffectiveServiceUrl } from '@/lib/codespace-utils'
@@ -20,6 +20,7 @@ import { useSmoothedLoadingIndicator } from '@/hooks/useSmoothedLoadingIndicator
 import { useLogsStream } from '@/hooks/useLogsStream'
 import { getHealthIcon, getPaneStyleClasses } from '@/lib/logs-pane-utils'
 import { UI_CONSTANTS } from '@/lib/constants'
+import { useTimeout } from '@/hooks/useTimeout'
 
 export interface LogEntry {
   service: string
@@ -114,6 +115,7 @@ export function LogsPane({
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null)
   const [showClassificationConfirmation, setShowClassificationConfirmation] = useState(false)
   const [copiedLineIndex, setCopiedLineIndex] = useState<number | null>(null)
+  const { setTimeout } = useTimeout()
   
   const [internalIsCollapsed, setInternalIsCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem(`logs-pane-collapsed-${serviceName}`)
@@ -123,9 +125,30 @@ export function LogsPane({
   const isCollapsed = controlledIsCollapsed ?? internalIsCollapsed
   const [configPanelOpen, setConfigPanelOpen] = useState(false)
   const { config: codespaceConfig } = useCodespaceEnv()
-  const effectiveLocalUrl = getEffectiveServiceUrl(url, port, codespaceConfig)
-  const azureUrl = service?.azure?.url
-  const effectiveUrl = logMode === 'azure' && azureUrl ? azureUrl : effectiveLocalUrl
+
+  const effectiveLocal = getEffectiveLocalUrl(
+    service?.local ?? (url ? { url, status: 'not-started', health: 'unknown' } : undefined)
+  )
+  const localPort = port ?? service?.local?.port
+  const transformedLocalUrl = getEffectiveServiceUrl(effectiveLocal.url, localPort, codespaceConfig)
+
+  const effectiveAzure = getEffectiveAzureUrl(service?.azure)
+
+  const effectiveUrl = logMode === 'azure'
+    ? effectiveAzure.url ?? transformedLocalUrl
+    : transformedLocalUrl ?? effectiveAzure.url
+
+  const effectiveUrlSource: 'azure' | 'local' | undefined = logMode === 'azure'
+    ? effectiveAzure.url
+      ? 'azure'
+      : transformedLocalUrl
+        ? 'local'
+        : undefined
+    : transformedLocalUrl
+      ? 'local'
+      : effectiveAzure.url
+        ? 'azure'
+        : undefined
   
   const isPausedRef = useRef(isPaused)
   const lastClearTimeRef = useRef<number>(Date.now() - 1000) // Initialize to 1s in the past
@@ -241,7 +264,9 @@ export function LogsPane({
         setSelectionPosition(null)
         globalThis.getSelection()?.removeAllRanges()
         setShowClassificationConfirmation(true)
-        setTimeout(() => setShowClassificationConfirmation(false), 2000)
+        // Use window.setTimeout to avoid bringing the hook's `setTimeout` into
+        // this callback's dependency array (prevents ESLint missing-deps warning)
+        window.setTimeout(() => setShowClassificationConfirmation(false), 2000)
       })
       .catch((err: unknown) => {
         console.error('Failed to save classification:', err)
@@ -290,6 +315,8 @@ export function LogsPane({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [handleClickOutside])
 
+  // No extra cleanup needed; timers are handled by useTimeout
+
   const processStatus = service?.local?.status
   const normalizedHealth = serviceHealth ? normalizeHealthStatus(serviceHealth) : undefined
   const visualStatus = getLogPaneVisualStatus(normalizedHealth, paneStatus as 'info' | 'warning' | 'error', processStatus)
@@ -318,8 +345,8 @@ export function LogsPane({
         healthCheckResult={healthCheckResult}
         service={service}
         effectiveUrl={effectiveUrl ?? undefined}
+        effectiveUrlSource={effectiveUrlSource}
         logMode={logMode}
-        azureUrl={azureUrl}
         onShowDetails={onShowDetails}
         handleCopyPane={handleCopyPane}
         onOpenConfigPanel={handleOpenConfigPanel}
