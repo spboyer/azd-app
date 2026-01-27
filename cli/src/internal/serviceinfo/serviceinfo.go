@@ -1,6 +1,10 @@
+// Package serviceinfo provides comprehensive service information management,
+// combining Azure YAML definitions, runtime state, and Azure environment data.
+// It serves as the single source of truth for service info used by both the info command and dashboard.
 package serviceinfo
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -25,19 +29,21 @@ func init() {
 // This is called by the listen command when azd fires an "environment updated" event.
 // By the time this is called, azd has already updated the process environment.
 func RefreshEnvironmentCache() {
-	environmentCacheMu.Lock()
-	defer environmentCacheMu.Unlock()
-
-	// Clear and repopulate the cache from current process environment
-	environmentCache = make(map[string]string)
+	// Build new cache outside the lock to minimize lock duration
+	newCache := make(map[string]string)
 
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		environmentCache[parts[0]] = parts[1]
+		newCache[parts[0]] = parts[1]
 	}
+
+	// Atomic swap using copy-on-write pattern
+	environmentCacheMu.Lock()
+	environmentCache = newCache
+	environmentCacheMu.Unlock()
 }
 
 // RefreshEnvironmentFromEvent updates the cached environment variables from a provision event.
@@ -114,8 +120,8 @@ func GetServiceInfo(projectDir string) ([]*ServiceInfo, error) {
 	reg := registry.GetRegistry(projectDir)
 	runningServices := reg.ListAll()
 
-	// Get Azure environment values (all values from azd env get-values)
-	azureEnv := getAzureEnvironmentValues(projectDir)
+	// Get Azure environment values (all values from process + event cache)
+	azureEnv := getAzureEnvironmentValues()
 
 	// Extract Azure service information from environment
 	azureServiceInfo := extractAzureServiceInfo(azureEnv)
@@ -141,24 +147,17 @@ func parseAzureYaml(projectDir string) (*service.AzureYaml, error) {
 	return azureYaml, nil
 }
 
-// getAzureEnvironmentValues reads Azure environment variables from the process environment.
-// When running as an azd extension, all Azure environment variables are already available
-// via os.Environ() - no need to shell out to 'azd env get-values'.
-// Additionally, it merges in values from the event-driven environment cache which is updated
-// when azd provision completes.
-func getAzureEnvironmentValues(projectDir string) map[string]string {
+// getAzureEnvironmentValues gets Azure environment variables from the process.
+// When running as an azd extension, all environment variables are injected by azd.
+// We also merge in cached values from provision events.
+func getAzureEnvironmentValues() map[string]string {
 	envVars := make(map[string]string)
 
-	// Get Azure environment variables from the process environment
-	// The azd extension framework provides these automatically: AZURE_*, SERVICE_*
+	// Get environment variables from process (azd injects all env vars when running extensions)
 	for _, line := range os.Environ() {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
-			key := parts[0]
-			// Only collect Azure and Service environment variables
-			if strings.HasPrefix(key, "AZURE_") || strings.HasPrefix(key, "SERVICE_") {
-				envVars[key] = parts[1]
-			}
+			envVars[parts[0]] = parts[1]
 		}
 	}
 
@@ -187,9 +186,17 @@ func extractAzureServiceInfo(envVars map[string]string) map[string]AzureServiceI
 	for key, value := range envVars {
 		keyUpper := strings.ToUpper(key)
 
-		// Skip system variables
-		if strings.Contains(keyUpper, "PIPE") || strings.Contains(keyUpper, "PATH") ||
-			strings.Contains(keyUpper, "TEMP") || strings.Contains(keyUpper, "HOME") {
+		// Skip system variables using prefix/exact matching to avoid false positives
+		// (e.g., SERVICE_PIPELINE_URL should not be filtered)
+		systemPrefixes := []string{"PATH", "TEMP", "TMP", "HOME", "COMSPEC", "WINDIR", "SYSTEMROOT", "PIPE"}
+		isSystemVar := false
+		for _, prefix := range systemPrefixes {
+			if keyUpper == prefix || strings.HasPrefix(keyUpper, prefix+"_") {
+				isSystemVar = true
+				break
+			}
+		}
+		if isSystemVar {
 			continue
 		}
 
@@ -275,7 +282,7 @@ func mergeServiceInfo(azureYaml *service.AzureYaml, runningServices []*registry.
 	serviceMap := make(map[string]*ServiceInfo)
 
 	// First, add all services from azure.yaml
-	if azureYaml != nil {
+	if azureYaml != nil && azureYaml.Services != nil {
 		for name, svc := range azureYaml.Services {
 			// Normalize service name to lowercase for case-insensitive matching
 			normalizedName := strings.ToLower(name)
@@ -358,6 +365,13 @@ func mergeServiceInfo(azureYaml *service.AzureYaml, runningServices []*registry.
 	}
 
 	// Overlay Azure service information (only for services in azure.yaml)
+	// Log when we have azure.yaml services but no Azure info discovered
+	if len(serviceMap) > 0 && len(azureServices) == 0 {
+		slog.Debug("No Azure service information discovered from environment variables",
+			"azureYamlServices", len(serviceMap),
+			"hint", "Ensure SERVICE_*_URL or SERVICE_*_NAME environment variables are set")
+	}
+
 	for serviceName, azureInfo := range azureServices {
 		// serviceName from azureServices is already lowercase
 		if existing, exists := serviceMap[serviceName]; exists {
