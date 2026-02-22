@@ -11,7 +11,7 @@
           "capabilities": [
             "custom-commands"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "reqs",
@@ -87,7 +87,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -158,7 +158,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -229,7 +229,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -300,7 +300,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -371,7 +371,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -442,7 +442,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -513,7 +513,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -584,7 +584,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -655,7 +655,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -726,7 +726,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -797,7 +797,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -868,7 +868,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -939,7 +939,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1010,7 +1010,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1081,7 +1081,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1152,7 +1152,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1223,7 +1223,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1294,7 +1294,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1365,7 +1365,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1436,7 +1436,7 @@
             "lifecycle-events",
             "mcp-server"
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1520,7 +1520,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1604,7 +1604,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1688,7 +1688,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1772,7 +1772,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1856,7 +1856,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -1940,7 +1940,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2024,7 +2024,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2108,7 +2108,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2192,7 +2192,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2276,7 +2276,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2360,7 +2360,7 @@
               "description": "Local-only container services for development (skipped during deploy)"
             }
           ],
-          "usage": "azd app <command> [options]",
+          "usage": "azd app \u003ccommand\u003e [options]",
           "examples": [
             {
               "name": "run",
@@ -2426,6 +2426,90 @@
               },
               "entryPoint": "jongio-azd-app-windows-arm64.exe",
               "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.3/jongio-azd-app-windows-arm64.zip"
+            }
+          }
+        },
+        {
+          "version": "0.12.4",
+          "capabilities": [
+            "custom-commands",
+            "lifecycle-events",
+            "mcp-server",
+            "service-target-provider"
+          ],
+          "providers": [
+            {
+              "name": "local",
+              "type": "service-target",
+              "description": "Local-only container services for development (skipped during deploy)"
+            }
+          ],
+          "usage": "azd app \u003ccommand\u003e [options]",
+          "examples": [
+            {
+              "name": "run",
+              "description": "Run services defined in azure.yaml",
+              "usage": "azd app run"
+            },
+            {
+              "name": "reqs",
+              "description": "Verify all prerequisites are installed",
+              "usage": "azd app reqs"
+            },
+            {
+              "name": "test",
+              "description": "Run tests for all services with coverage",
+              "usage": "azd app test --coverage"
+            }
+          ],
+          "artifacts": {
+            "darwin/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "467012c733fbdb7f2b82a4c4db1d8bb580317724b7045d45375cd2867228fc38"
+              },
+              "entryPoint": "jongio-azd-app-darwin-amd64",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-darwin-amd64.zip"
+            },
+            "darwin/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "b9dc4091b698e8742a4907f3722854d60455aff559488fcbf979e3c9425f87d2"
+              },
+              "entryPoint": "jongio-azd-app-darwin-arm64",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-darwin-arm64.zip"
+            },
+            "linux/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "75915a0fdef9489d256f50d28a1c1b5fc9cfe07efa828d067dcba587e8a59cae"
+              },
+              "entryPoint": "jongio-azd-app-linux-amd64",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-linux-amd64.tar.gz"
+            },
+            "linux/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "d1cc37d437b5d6408b78018f13b855b9597cabdbf7278ccaf37a066e9bb26fc1"
+              },
+              "entryPoint": "jongio-azd-app-linux-arm64",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-linux-arm64.tar.gz"
+            },
+            "windows/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "787d32ea24a1be1e7fd0ce10181037b9ac171fd01a0169d692c41c064d0498e4"
+              },
+              "entryPoint": "jongio-azd-app-windows-amd64.exe",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-windows-amd64.zip"
+            },
+            "windows/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "bcfbe48bd30175fcea14237516f1cd0c8214679d4b310b2551cc43d048047a42"
+              },
+              "entryPoint": "jongio-azd-app-windows-arm64.exe",
+              "url": "https://github.com/jongio/azd-app/releases/download/azd-ext-jongio-azd-app_0.12.4/jongio-azd-app-windows-arm64.zip"
             }
           }
         }
