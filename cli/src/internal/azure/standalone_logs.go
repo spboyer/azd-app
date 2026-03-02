@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -113,6 +115,10 @@ func getServicesFromAzureYAML(projectDir string) ([]ServiceInfo, error) {
 	return services, nil
 }
 
+// serviceNameEnvRe matches env var keys like SERVICE_API_NAME or SERVICE_MY_SVC_NAME
+// but NOT compound suffixes such as SERVICE_API_IMAGE_NAME (filtered separately below).
+var serviceNameEnvRe = regexp.MustCompile(`^SERVICE_(.+)_NAME$`)
+
 // getServiceNameMap returns a map of azure.yaml service names to Azure resource names.
 // Uses environment variables directly since the azd extension framework provides them.
 func getServiceNameMap(projectDir string) map[string]string {
@@ -121,18 +127,31 @@ func getServiceNameMap(projectDir string) map[string]string {
 	// When running as an azd extension, all environment variables are already available
 	// via os.Environ(). No need to shell out to 'azd env get-values'.
 	for _, line := range os.Environ() {
-		if strings.HasPrefix(line, "SERVICE_") && strings.Contains(line, "_NAME=") && !strings.Contains(line, "_IMAGE_NAME=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := parts[0]
-				key = strings.TrimPrefix(key, "SERVICE_")
-				key = strings.TrimSuffix(key, "_NAME")
-				key = strings.ToLower(strings.ReplaceAll(key, "_", "-"))
-				value := strings.Trim(parts[1], "\"")
-				if value != "" {
-					serviceNameMap[key] = value
-				}
-			}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		envKey := parts[0]
+		m := serviceNameEnvRe.FindStringSubmatch(envKey)
+		if m == nil {
+			continue
+		}
+		// m[1] is the service-name portion (e.g. "API" from "SERVICE_API_NAME").
+		// Reject compound suffixes like IMAGE_NAME or RESOURCE_NAME by ensuring
+		// the captured group does not itself end with a known qualifier.
+		svcPart := m[1]
+		// Only exclude _IMAGE suffix – this is the only known compound property
+		// that produces a SERVICE_*_NAME env var (SERVICE_<svc>_IMAGE_NAME).
+		// Broader filtering would reject legitimate service names like "my-resource".
+		// See: serviceinfo/serviceinfo.go, dashboard/azure_logs_config.go for consistency.
+		if strings.HasSuffix(svcPart, "_IMAGE") {
+			continue
+		}
+
+		key := strings.ToLower(strings.ReplaceAll(svcPart, "_", "-"))
+		value := strings.Trim(parts[1], "\"")
+		if value != "" {
+			serviceNameMap[key] = value
 		}
 	}
 
@@ -334,24 +353,16 @@ func FetchAzureLogsStandalone(ctx context.Context, config StandaloneLogsConfig) 
 
 // sortLogEntriesByTimeDesc sorts log entries by timestamp in descending order.
 func sortLogEntriesByTimeDesc(entries []LogEntry) {
-	for i := 0; i < len(entries)-1; i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[j].Timestamp.After(entries[i].Timestamp) {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.After(entries[j].Timestamp)
+	})
 }
 
 // sortLogEntriesByTimeAsc sorts log entries by timestamp in ascending order.
 func sortLogEntriesByTimeAsc(entries []LogEntry) {
-	for i := 0; i < len(entries)-1; i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[j].Timestamp.Before(entries[i].Timestamp) {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
 }
 
 // AzureLogsError represents an error with actionable guidance.
