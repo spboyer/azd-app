@@ -196,6 +196,7 @@ jobs:
           cd ..
 
       - name: Build for multiple platforms
+        if: matrix.os == 'ubuntu-latest'
         run: |
           GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/app.exe ./src/cmd/app
           GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/app ./src/cmd/app
@@ -203,6 +204,7 @@ jobs:
           GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/app ./src/cmd/app
 
       - name: Upload artifacts
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: binaries
